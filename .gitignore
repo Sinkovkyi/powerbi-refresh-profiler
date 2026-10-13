@@ -1,0 +1,21 @@
+# Traces and generated data contain model, server and user names
+*.xml
+*.XML
+!tests/fixtures/sample_refresh_trace.xml
+XML/*
+!XML/.gitkeep
+*.xlsx
+!demo/refresh_analysis_demo.xlsx
+*.pbix
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Editors and OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
