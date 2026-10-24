@@ -22,7 +22,7 @@ ET.SubElement(hdr, "TraceProvider", name="Microsoft Analysis Services", MajorVer
 ET.SubElement(hdr, "ServerInformation", name="powerbi://api.powerbi.com/v1.0/myorg/Demo Workspace")
 events = ET.SubElement(root, "Events")
 ids = {"Command Begin": "15", "Command End": "16", "Progress Report Begin": "5", "Progress Report End": "6",
-       "Query End": "10",
+       "Query End": "10", "Error": "17",
        "Lock Wait": "54", "Job Graph": "134", "Execution Metrics": "136"}
 
 
@@ -95,6 +95,13 @@ event("Progress Report End", EventSubclass="59", StartTime="2026-09-08T10:00:01+
 event("Progress Report Begin", EventSubclass="46", StartTime="2026-09-08T10:00:07+02:00", ActivityID=A,
       RequestID=R1, DatabaseName=DB, NTUserName=USER, ObjectName="Sales", ObjectPath=f"{DB}.Model.Sales.Rel1",
       TextData="Started building relationship 'Sales'[CustomerKey] -> 'Customer'[CustomerKey].")
+
+# 5c. Two errors of the refresh session, written in the order they were logged: the later one first.
+# The Errors sheet must put the earlier one on top (ID 1)
+event("Error", EventSubclass="1", Error="3238395905", StartTime="2026-09-08T10:00:06+02:00", ActivityID=A,
+      RequestID=R1, DatabaseName=DB, NTUserName=USER, TextData="Second error: the operation was cancelled.")
+event("Error", EventSubclass="1", Error="3238395904", StartTime="2026-09-08T10:00:02+02:00", ActivityID=A,
+      RequestID=R1, DatabaseName=DB, NTUserName=USER, TextData="First error: out of memory.")
 
 # 6. Refresh phases: Sequence point overlaps the timeline (not listed), Commit is listed
 event("Progress Report End", EventSubclass="58", StartTime="2026-09-08T10:00:01+02:00", Duration="6500",

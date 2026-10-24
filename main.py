@@ -572,6 +572,7 @@ def build_refresh_analysis(xml_path, output_file_path):
                 'ErrorCode': columns_data.get('ErrorCode', ''),
                 'StartTime': format_ts(start_time, start_str),
                 'RequestID': request_id,
+                '_start': start_time,
                 '_activity': activity_id
             })
 
@@ -711,8 +712,13 @@ def build_refresh_analysis(xml_path, output_file_path):
         job_graph_chunks = {r: c for r, c in job_graph_chunks.items()
                             if in_refresh_session(job_graph_activity.get(r, ''))}
         open_objects = {k: v for k, v in open_objects.items() if in_refresh_session(v['_activity'])}
-        for number, error in enumerate(errors_list, start=1):
-            error['ID'] = number
+
+    # Oldest first: ID 1 is the earliest error of the trace, the likely root cause. The trace lists
+    # events in the order they finish, so a failure is logged after the errors that led to it.
+    # sorted() is stable, so events with the same time keep their order from the trace
+    errors_list = sorted(errors_list, key=lambda e: e['_start'].replace(tzinfo=None) if e['_start'] else datetime.max)
+    for number, error in enumerate(errors_list, start=1):
+        error['ID'] = number
 
     # --------------------------------------------------------
     # TIMELINE: from the Job Graph when present, otherwise from End events

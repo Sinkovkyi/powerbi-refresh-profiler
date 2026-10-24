@@ -107,7 +107,15 @@ class SampleTraceTest(unittest.TestCase):
         self.assertAlmostEqual(summary["Sum_Object_Duration_Sec"], 0.2 + 3.8 + 2.0 + 0.5)
 
     def test_other_sessions_are_not_in_errors(self):
-        self.assertEqual(len(self.sheets["Errors"]), 0)
+        # the failed queries of another session are not here; only the two errors of the refresh session
+        self.assertEqual(len(self.sheets["Errors"]), 2)
+        self.assertEqual(set(self.sheets["Errors"]["RequestID"]), {"11111111-0000-4000-8000-000000000011"})
+
+    def test_errors_oldest_first(self):
+        errors = self.sheets["Errors"]
+        self.assertEqual(list(errors["ID"]), [1, 2])
+        self.assertIn("First error", errors.iloc[0]["TextData"])
+        self.assertIn("Second error", errors.iloc[1]["TextData"])
 
 
 class ActivityStatsTest(unittest.TestCase):

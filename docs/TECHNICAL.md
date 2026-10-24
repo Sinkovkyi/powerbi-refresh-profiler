@@ -250,6 +250,10 @@ Columns: `Action`, `Duration_Sec`, `StartTime`, `RequestID`, `TextData`.
 
 Columns: `ID`, `Action`, `TextData`, `Error` (error number), `ErrorCode`, `StartTime`, `RequestID`.
 
+`ID` is a number from 1, assigned after sorting by `StartTime`, oldest first. Row 1 is the earliest error of the trace and
+the likely root cause; the rows after it are often consequences (cancelled commands, rollbacks). The trace lists events
+in the order they finish, so without the sort the failure would come before the errors that caused it.
+
 ### Unfinished
 
 Objects with a `Progress Report Begin` and no matching `Progress Report End`. Only End events reach the Timeline, so
