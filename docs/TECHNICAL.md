@@ -371,7 +371,9 @@ operation mostly waited, usually for the data source during Process Partition.
   tested it did not fit the timeline (a 4.5 s wait recorded 0.05 s after the session was created), so it is kept in
   TextData only.
 - **Finalization is a remainder.** Commit start and end are logged to the second, so the wait before Commit and the
-  tail after it cannot be split. If Preparation + Timeline + Commit are longer than the refresh command (the timeline
+  tail after it cannot be split. Only the Commit / Rollback of the refresh request itself is subtracted: a trace can
+  hold earlier attempts that were rolled back, and counting their Rollbacks pushed Finalization below 0 (−0.213 s on a
+  trace with four attempts). If Preparation + Timeline + Commit are longer than the refresh command (the timeline
   reaches past the command end, for example on a failed refresh), the remainder would be negative. The script shows 0,
   puts the overshoot into the `TextData` of the row and prints a warning.
 - **Duration 0 in the Timeline** means the operation started and finished inside one timestamp of the Job Graph and

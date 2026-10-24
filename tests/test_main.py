@@ -133,6 +133,26 @@ class ActivityStatsTest(unittest.TestCase):
         self.assertAlmostEqual(stats["Idle_Time_Sec"], 0.0)
 
 
+class SeveralAttemptsTest(unittest.TestCase):
+    """A trace with earlier failed attempts: only the Rollback of the refresh request counts."""
+
+    def test_rollbacks_of_earlier_attempts_do_not_make_finalization_negative(self):
+        base = datetime(2026, 10, 14, 10, 0, 0)
+        at = lambda sec: base + timedelta(seconds=sec)
+        events = [{"RequestID": "NOW", "StartTime": at(11), "EndTime": at(70), "Duration_Sec": 59.0}]
+        system = [
+            {"Action": "Rollback", "Duration_Sec": 0.3, "StartTime": at(-100), "RequestID": "OLD1"},
+            {"Action": "Rollback", "Duration_Sec": 0.4, "StartTime": at(-50), "RequestID": "OLD2"},
+            {"Action": "Rollback", "Duration_Sec": 0.1, "StartTime": at(71), "RequestID": "NOW"},
+        ]
+        command = {"RequestID": "NOW", "Duration_Sec": 71.0}
+        main.add_refresh_phases(events, system, command, {"NOW": at(0)})
+        phases = {e["Action"]: e["Duration_Sec"] for e in system if e["Action"] in ("Preparation", "Finalization")}
+        self.assertAlmostEqual(phases["Preparation"], 11.0)
+        # 71 - 11 - 59 - 0.1 = 0.9; with the old Rollbacks it would be 0.9 - 0.7 = 0.2, with more of them below 0
+        self.assertAlmostEqual(phases["Finalization"], 0.9)
+
+
 class TimestampTest(unittest.TestCase):
     """Profiler timestamp formats; must parse on every supported Python version (3.10+)."""
 

@@ -341,8 +341,10 @@ def add_refresh_phases(events, system_events_list, refresh_command, request_star
         return
 
     refresh_start = refresh_start.replace(tzinfo=None)
+    # Only the Commit / Rollback of the refresh request itself. A trace can hold several
+    # attempts (earlier ones rolled back); counting theirs too makes Finalization negative
     transaction_sec = sum(ev['Duration_Sec'] for ev in system_events_list
-                          if ev['Action'] in TRANSACTION_END.values())
+                          if ev['Action'] in TRANSACTION_END.values() and ev.get('RequestID') == request_id)
     preparation_sec = max((first_op - refresh_start).total_seconds(), 0.0)
     # Finalization is the remainder: the wait before Commit plus the tail after it.
     # Commit start/end are logged to the second, so the two cannot be split further
