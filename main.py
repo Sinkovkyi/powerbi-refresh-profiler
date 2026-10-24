@@ -12,7 +12,7 @@ which the Power BI report uses as its data source:
                        Timeline span + these durations = refresh duration
     Errors             Error events and every failed or cancelled End event
     Execution Metrics  one row per refresh attempt: duration, peak memory, CPU,
-                       attempt number and status, busy / idle time of its Timeline
+                       attempt number and status
     Unfinished         objects with a Progress Report Begin but no End
 
 Usage: put exactly one .xml trace next to this script and run it.
@@ -87,8 +87,7 @@ UNFINISHED_COLUMNS = [
 EXEC_METRICS_COLUMNS = [
     'Command Type', 'Refresh Parallelism', 'Duration Sec', 'Peak RAM GB',
     'Total CPU Sec', 'M Engine CPU Sec', 'VertiPaq CPU Sec', 'StartTime', 'EndTime', 'RequestID',
-    'Attempt', 'Attempt_Label', 'Status',
-    'Timeline_Span_Sec', 'Busy_Time_Sec', 'Idle_Time_Sec', 'Sum_Object_Duration_Sec'
+    'Attempt', 'Attempt_Label', 'Status'
 ]
 # Name of the remainder row: a successful attempt ends with Commit, a failed one is stopped
 FINALIZATION = {'Success': "Finalization", 'Failed': "Shutdown after failure"}
@@ -290,31 +289,6 @@ def assign_fallback_threads(fallback_events):
         ev['Thread_ID'] = f"Thread {assigned_thread}"
 
     return fallback_events
-
-
-def compute_activity_stats(refresh_ops):
-    """Wall-clock span of the Timeline split into busy time (at least one
-    operation running) and idle time (gaps with nothing running).
-    Sum_Object_Duration_Sec adds every operation up, so parallel work counts twice."""
-    spans = sorted((ev['StartTime'].replace(tzinfo=None), ev['EndTime'].replace(tzinfo=None))
-                   for ev in refresh_ops)
-    busy_sec = 0.0
-    cur_start, cur_end = spans[0]
-    for start, end in spans[1:]:
-        if start > cur_end:
-            busy_sec += (cur_end - cur_start).total_seconds()
-            cur_start, cur_end = start, end
-        elif end > cur_end:
-            cur_end = end
-    busy_sec += (cur_end - cur_start).total_seconds()
-
-    span_sec = (max(end for _, end in spans) - spans[0][0]).total_seconds()
-    return {
-        'Timeline_Span_Sec': round(span_sec, 6),
-        'Busy_Time_Sec': round(busy_sec, 6),
-        'Idle_Time_Sec': round(max(span_sec - busy_sec, 0.0), 6),
-        'Sum_Object_Duration_Sec': round(sum(ev['Duration_Sec'] for ev in refresh_ops), 6),
-    }
 
 
 def build_attempts(refresh_commands, system_events_list):
@@ -801,9 +775,6 @@ def build_refresh_analysis(xml_path, output_file_path):
         for em in exec_metrics_list:
             attempt = by_request[em['RequestID']]
             em.update({key: attempt[key] for key in ('Attempt', 'Attempt_Label', 'Status')})
-            ops = attempt_ops(events, attempt, attempts)
-            if ops:
-                em.update(compute_activity_stats(ops))
     else:
         refresh_ids = {ev['RequestID'] for ev in events}
         exec_metrics_list = [em for em in exec_metrics_list if em['RequestID'] in refresh_ids]

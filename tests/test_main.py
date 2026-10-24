@@ -99,13 +99,6 @@ class SampleTraceTest(unittest.TestCase):
         # started 10:00:07, the trace ends 10:00:09.5
         self.assertAlmostEqual(row["Open_Until_Trace_End_Sec"], 2.5, places=3)
 
-    def test_busy_and_idle_time_of_the_attempt(self):
-        row = self.sheets["Execution Metrics"].iloc[0]
-        self.assertAlmostEqual(row["Timeline_Span_Sec"], 6.5)
-        self.assertAlmostEqual(row["Busy_Time_Sec"], 6.5)
-        self.assertAlmostEqual(row["Idle_Time_Sec"], 0.0)
-        self.assertAlmostEqual(row["Sum_Object_Duration_Sec"], 0.2 + 3.8 + 2.0 + 0.5)
-
     def test_single_attempt(self):
         row = self.sheets["Execution Metrics"].iloc[0]
         self.assertEqual(row["Attempt"], 1)
@@ -122,29 +115,6 @@ class SampleTraceTest(unittest.TestCase):
         self.assertEqual(list(errors["ID"]), [1, 2])
         self.assertIn("First error", errors.iloc[0]["TextData"])
         self.assertIn("Second error", errors.iloc[1]["TextData"])
-
-
-class ActivityStatsTest(unittest.TestCase):
-    """Busy / idle split of the Timeline: parallel work is counted once, gaps are idle."""
-
-    @staticmethod
-    def op(start, end):
-        base = datetime(2026, 9, 8, 10, 0, 0)
-        return {"StartTime": base + timedelta(seconds=start), "EndTime": base + timedelta(seconds=end),
-                "Duration_Sec": end - start}
-
-    def test_parallel_work_counts_once_and_gap_is_idle(self):
-        ops = [self.op(0, 4), self.op(1, 3), self.op(3, 5), self.op(8, 10)]
-        stats = main.compute_activity_stats(ops)
-        self.assertAlmostEqual(stats["Timeline_Span_Sec"], 10.0)
-        self.assertAlmostEqual(stats["Busy_Time_Sec"], 7.0)
-        self.assertAlmostEqual(stats["Idle_Time_Sec"], 3.0)
-        self.assertAlmostEqual(stats["Sum_Object_Duration_Sec"], 4 + 2 + 2 + 2)
-
-    def test_single_operation(self):
-        stats = main.compute_activity_stats([self.op(2, 3)])
-        self.assertAlmostEqual(stats["Busy_Time_Sec"], 1.0)
-        self.assertAlmostEqual(stats["Idle_Time_Sec"], 0.0)
 
 
 TWO_ATTEMPTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "two_attempts_trace.xml")

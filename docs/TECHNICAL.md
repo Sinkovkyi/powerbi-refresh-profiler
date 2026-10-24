@@ -285,10 +285,6 @@ empty.
 | Attempt | 1, 2, 3… by command start, 1 = earliest |
 | Attempt_Label | `Last` for the last attempt, the number for the others. A slicer saved on `Last` shows the latest attempt of any trace |
 | Status | `Success`: Command End with `Success = 1` and no Rollback. `Failed`: everything else |
-| Timeline_Span_Sec | First Timeline start to last Timeline end of the attempt |
-| Busy_Time_Sec | Part of the span with at least one operation running. Parallel operations count once (union of intervals) |
-| Idle_Time_Sec | `Timeline_Span_Sec − Busy_Time_Sec`: gaps with nothing running, for example waiting on the source |
-| Sum_Object_Duration_Sec | Sum of `Duration_Sec` over the attempt's Timeline. Parallel work counts several times |
 
 ---
 
