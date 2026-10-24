@@ -21,7 +21,8 @@ ET.SubElement(hdr, "TraceProvider", name="Microsoft Analysis Services", MajorVer
               BuildNumber="88")
 ET.SubElement(hdr, "ServerInformation", name="powerbi://api.powerbi.com/v1.0/myorg/Demo Workspace")
 events = ET.SubElement(root, "Events")
-ids = {"Command Begin": "15", "Command End": "16", "Progress Report End": "6", "Query End": "10",
+ids = {"Command Begin": "15", "Command End": "16", "Progress Report Begin": "5", "Progress Report End": "6",
+       "Query End": "10",
        "Lock Wait": "54", "Job Graph": "134", "Execution Metrics": "136"}
 
 
@@ -82,6 +83,18 @@ event("Job Graph", EventSubclass="2", IntegerData="1", CurrentTime="2026-09-08T1
       RequestID=R1, DatabaseName=DB, NTUserName=USER, TextData=dgml[:half])
 event("Job Graph", EventSubclass="2", IntegerData="2", CurrentTime="2026-09-08T10:00:08+02:00", ActivityID=A,
       RequestID=R1, DatabaseName=DB, NTUserName=USER, TextData=dgml[half:])
+
+# 5b. Progress Report Begin / End pairs. The partition (subclass 59) finishes; the relationship
+# build (subclass 46) never gets an End, like a relationship that was still running when the trace stopped
+event("Progress Report Begin", EventSubclass="59", StartTime="2026-09-08T10:00:01+02:00", ActivityID=A,
+      RequestID=R1, DatabaseName=DB, NTUserName=USER, ObjectName="Sales", ObjectPath=f"{DB}.Model.Sales.Sales",
+      TextData="Started processing partition 'Sales'.")
+event("Progress Report End", EventSubclass="59", StartTime="2026-09-08T10:00:01+02:00", Duration="3800",
+      CPUTime="1000", Success="1", Error="0", ActivityID=A, RequestID=R1, DatabaseName=DB, NTUserName=USER,
+      ObjectName="Sales", ObjectPath=f"{DB}.Model.Sales.Sales", TextData="Finished processing partition 'Sales'.")
+event("Progress Report Begin", EventSubclass="46", StartTime="2026-09-08T10:00:07+02:00", ActivityID=A,
+      RequestID=R1, DatabaseName=DB, NTUserName=USER, ObjectName="Sales", ObjectPath=f"{DB}.Model.Sales.Rel1",
+      TextData="Started building relationship 'Sales'[CustomerKey] -> 'Customer'[CustomerKey].")
 
 # 6. Refresh phases: Sequence point overlaps the timeline (not listed), Commit is listed
 event("Progress Report End", EventSubclass="58", StartTime="2026-09-08T10:00:01+02:00", Duration="6500",

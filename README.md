@@ -301,6 +301,14 @@ take rounding. Full breakdown: [TECHNICAL.md → How the duration adds up](docs/
 No. The event has no Duration column, and its `WaitTime` value is undocumented and does not fit the traced timeline.
 The details stay in TextData.
 
+**Many Timeline rows have Duration 0. Did they not run?**
+They ran. Start and end fall inside the same timestamp of the Job Graph and CPU time is 0, so the operation was too
+short to measure. They are not skipped.
+
+**An object is on the Unfinished sheet. Did the refresh fail?**
+Not necessarily. The sheet lists objects with a start event and no end event in the trace. The engine does not always
+log an end for a relationship build, and the refresh still succeeds. Check the Errors sheet for failures.
+
 **Is my data sent anywhere?**
 No. Everything runs locally. Traces (`.xml`) and workbooks (`.xlsx`) contain model, server and user names and are
 excluded by `.gitignore`; only the anonymised demo workbook is committed.
@@ -315,6 +323,7 @@ excluded by `.gitignore`; only the anonymised demo workbook is committed.
 | `More than one XML found next to main.py…` | Several traces in the folder | Keep one, move the rest to `XML/` |
 | `No events found. Excel file was not updated.` | The trace has no refresh | Check the events and that the refresh ran while recording |
 | `Main refresh command found` is not printed | `Command Begin` was not recorded | Add the event |
+| `WARNING: the refresh phases exceed the refresh command duration` | Timeline or Commit reach past the end of the refresh command, usually on a failed refresh | Finalization is shown as 0; the overshoot is in its `TextData` |
 | No Preparation / Finalization rows | `Execution Metrics` or `Command End` was not recorded | Add both events |
 | *Could not find file '…\refresh_analysis.xlsx'* when opening the template | The template points to the folder it was built in | [Step 3](#step-3-open-the-report) |
 

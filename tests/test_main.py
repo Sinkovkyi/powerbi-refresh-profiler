@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import main  # noqa: E402
 
 FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "sample_refresh_trace.xml")
-SHEETS = ["Summary Info", "Timeline", "System Events", "Errors", "Execution Metrics"]
+SHEETS = ["Summary Info", "Timeline", "System Events", "Errors", "Execution Metrics", "Unfinished"]
 
 
 class SampleTraceTest(unittest.TestCase):
@@ -42,6 +42,7 @@ class SampleTraceTest(unittest.TestCase):
             "System Events": main.SYSTEM_EVENTS_COLUMNS,
             "Errors": main.ERRORS_COLUMNS,
             "Execution Metrics": main.EXEC_METRICS_COLUMNS,
+            "Unfinished": main.UNFINISHED_COLUMNS,
         }
         for sheet, columns in expected.items():
             self.assertEqual(list(self.sheets[sheet].columns), columns, sheet)
@@ -89,8 +90,47 @@ class SampleTraceTest(unittest.TestCase):
         self.assertAlmostEqual(row["Peak RAM GB"], 1.0)
         self.assertEqual(row["Refresh Parallelism"], 2)
 
+    def test_unfinished_objects(self):
+        unfinished = self.sheets["Unfinished"]
+        self.assertEqual(len(unfinished), 1)
+        row = unfinished.iloc[0]
+        self.assertEqual(row["EventSubclass"], 46)
+        self.assertIn("relationship", row["Details"])
+        # started 10:00:07, the trace ends 10:00:09.5
+        self.assertAlmostEqual(row["Open_Until_Trace_End_Sec"], 2.5, places=3)
+
+    def test_summary_busy_and_idle_time(self):
+        summary = self.sheets["Summary Info"].iloc[0]
+        self.assertAlmostEqual(summary["Timeline_Span_Sec"], 6.5)
+        self.assertAlmostEqual(summary["Busy_Time_Sec"], 6.5)
+        self.assertAlmostEqual(summary["Idle_Time_Sec"], 0.0)
+        self.assertAlmostEqual(summary["Sum_Object_Duration_Sec"], 0.2 + 3.8 + 2.0 + 0.5)
+
     def test_other_sessions_are_not_in_errors(self):
         self.assertEqual(len(self.sheets["Errors"]), 0)
+
+
+class ActivityStatsTest(unittest.TestCase):
+    """Busy / idle split of the Timeline: parallel work is counted once, gaps are idle."""
+
+    @staticmethod
+    def op(start, end):
+        base = datetime(2026, 9, 8, 10, 0, 0)
+        return {"StartTime": base + timedelta(seconds=start), "EndTime": base + timedelta(seconds=end),
+                "Duration_Sec": end - start}
+
+    def test_parallel_work_counts_once_and_gap_is_idle(self):
+        ops = [self.op(0, 4), self.op(1, 3), self.op(3, 5), self.op(8, 10)]
+        stats = main.compute_activity_stats(ops)
+        self.assertAlmostEqual(stats["Timeline_Span_Sec"], 10.0)
+        self.assertAlmostEqual(stats["Busy_Time_Sec"], 7.0)
+        self.assertAlmostEqual(stats["Idle_Time_Sec"], 3.0)
+        self.assertAlmostEqual(stats["Sum_Object_Duration_Sec"], 4 + 2 + 2 + 2)
+
+    def test_single_operation(self):
+        stats = main.compute_activity_stats([self.op(2, 3)])
+        self.assertAlmostEqual(stats["Busy_Time_Sec"], 1.0)
+        self.assertAlmostEqual(stats["Idle_Time_Sec"], 0.0)
 
 
 class TimestampTest(unittest.TestCase):

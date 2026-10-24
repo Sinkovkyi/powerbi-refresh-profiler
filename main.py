@@ -5,13 +5,15 @@ Reads a SQL Server Profiler trace of a Power BI semantic model refresh
 (saved as a Trace XML file) and writes refresh_analysis.xlsx,
 which the Power BI report uses as its data source:
 
-    Summary Info       database, user, trace start and end
+    Summary Info       database, user, trace start and end,
+                       busy / idle time of the Timeline
     Timeline           every processed object (partition, column, hierarchy,
                        relationship) with its thread, duration and CPU time
     System Events      Preparation, Finalization, Commit/Rollback and Lock Wait;
                        Timeline span + these durations = refresh duration
     Errors             Error events and every failed or cancelled End event
     Execution Metrics  duration, peak memory and CPU of the refresh request
+    Unfinished         objects with a Progress Report Begin but no End
 
 Usage: put exactly one .xml trace next to this script and run it.
 Traces kept in subfolders (e.g. XML/) are ignored.
@@ -79,6 +81,9 @@ TIMELINE_COLUMNS = [
 ]
 SYSTEM_EVENTS_COLUMNS = ['Action', 'Duration_Sec', 'StartTime', 'RequestID', 'TextData']
 ERRORS_COLUMNS = ['ID', 'Action', 'TextData', 'Error', 'ErrorCode', 'StartTime', 'RequestID']
+UNFINISHED_COLUMNS = [
+    'ObjectName', 'EventSubclass', 'Details', 'StartTime', 'Open_Until_Trace_End_Sec', 'RequestID'
+]
 EXEC_METRICS_COLUMNS = [
     'Command Type', 'Refresh Parallelism', 'Duration Sec', 'Peak RAM GB',
     'Total CPU Sec', 'M Engine CPU Sec', 'VertiPaq CPU Sec', 'StartTime', 'EndTime', 'RequestID'
@@ -283,6 +288,38 @@ def assign_fallback_threads(fallback_events):
     return fallback_events
 
 
+def select_refresh_ops(events, refresh_command):
+    """Timeline rows of the refresh request. Without a Job Graph the Timeline
+    also holds other requests; only the refresh request's own operations count."""
+    request_id = refresh_command['RequestID'] if refresh_command else events[0]['RequestID']
+    return request_id, ([ev for ev in events if ev['RequestID'] == request_id] or events)
+
+
+def compute_activity_stats(refresh_ops):
+    """Wall-clock span of the Timeline split into busy time (at least one
+    operation running) and idle time (gaps with nothing running).
+    Sum_Object_Duration_Sec adds every operation up, so parallel work counts twice."""
+    spans = sorted((ev['StartTime'].replace(tzinfo=None), ev['EndTime'].replace(tzinfo=None))
+                   for ev in refresh_ops)
+    busy_sec = 0.0
+    cur_start, cur_end = spans[0]
+    for start, end in spans[1:]:
+        if start > cur_end:
+            busy_sec += (cur_end - cur_start).total_seconds()
+            cur_start, cur_end = start, end
+        elif end > cur_end:
+            cur_end = end
+    busy_sec += (cur_end - cur_start).total_seconds()
+
+    span_sec = (max(end for _, end in spans) - spans[0][0]).total_seconds()
+    return {
+        'Timeline_Span_Sec': round(span_sec, 6),
+        'Busy_Time_Sec': round(busy_sec, 6),
+        'Idle_Time_Sec': round(max(span_sec - busy_sec, 0.0), 6),
+        'Sum_Object_Duration_Sec': round(sum(ev['Duration_Sec'] for ev in refresh_ops), 6),
+    }
+
+
 def add_refresh_phases(events, system_events_list, refresh_command, request_start_times):
     """Add Preparation and Finalization rows to System Events so that
     Preparation + Processing (Timeline span) + Commit/Rollback + Finalization
@@ -290,10 +327,7 @@ def add_refresh_phases(events, system_events_list, refresh_command, request_star
     if not events:
         return
 
-    request_id = refresh_command['RequestID'] if refresh_command else events[0]['RequestID']
-    # Without a Job Graph the Timeline also holds other requests; only the
-    # refresh request's own operations count as Processing
-    refresh_ops = [ev for ev in events if ev['RequestID'] == request_id] or events
+    request_id, refresh_ops = select_refresh_ops(events, refresh_command)
 
     # Timestamps are compared as wall-clock values: Execution Metrics marks them
     # with 'Z' while the other events carry a local offset for the same clock
@@ -312,7 +346,17 @@ def add_refresh_phases(events, system_events_list, refresh_command, request_star
     preparation_sec = max((first_op - refresh_start).total_seconds(), 0.0)
     # Finalization is the remainder: the wait before Commit plus the tail after it.
     # Commit start/end are logged to the second, so the two cannot be split further
-    finalization_sec = refresh_command['Duration_Sec'] - preparation_sec - processing_sec - transaction_sec
+    remainder_sec = refresh_command['Duration_Sec'] - preparation_sec - processing_sec - transaction_sec
+    finalization_sec = max(remainder_sec, 0.0)
+    finalization_note = "Wait before Commit/Rollback and the tail after it (remainder of the refresh duration)"
+    if remainder_sec < 0:
+        # The measured parts add up to more than the refresh command: the Timeline or
+        # Commit reach past the command end. A negative duration would be wrong, so it
+        # is shown as 0 and the overshoot is kept in the text
+        finalization_note = (f"Not a real duration: Preparation + Timeline + Commit/Rollback exceed the refresh "
+                             f"command by {-remainder_sec:.3f} s, so Finalization is shown as 0")
+        print(f"WARNING: the refresh phases exceed the refresh command duration by {-remainder_sec:.3f} s "
+              f"(Finalization set to 0).")
 
     system_events_list.append({
         'Action': "Preparation",
@@ -326,7 +370,7 @@ def add_refresh_phases(events, system_events_list, refresh_command, request_star
         'Duration_Sec': round(finalization_sec, 6),
         'StartTime': last_op,
         'RequestID': request_id,
-        'TextData': "Wait before Commit/Rollback and the tail after it (remainder of the refresh duration)"
+        'TextData': finalization_note
     })
 
 
@@ -346,7 +390,8 @@ def write_sheet(writer, records, sheet_name, columns, sort_by=None, ascending=Fa
     df.to_excel(writer, sheet_name=sheet_name, index=False)
 
 
-def write_excel(output_file_path, summary_data, events, system_events_list, errors_list, exec_metrics_list):
+def write_excel(output_file_path, summary_data, events, system_events_list, errors_list, exec_metrics_list,
+                unfinished_list):
     """Write all sheets of the output workbook."""
     timeline_df = pd.DataFrame(events)
     timeline_df['Duration_Sec'] = timeline_df['Duration_Sec'].astype(float)
@@ -362,6 +407,8 @@ def write_excel(output_file_path, summary_data, events, system_events_list, erro
         write_sheet(writer, errors_list, 'Errors', ERRORS_COLUMNS)
         write_sheet(writer, exec_metrics_list, 'Execution Metrics', EXEC_METRICS_COLUMNS,
                     sort_by='Duration Sec')
+        write_sheet(writer, unfinished_list, 'Unfinished', UNFINISHED_COLUMNS,
+                    sort_by='StartTime', ascending=True)
 
 
 # ============================================================
@@ -393,6 +440,10 @@ def build_refresh_analysis(xml_path, output_file_path):
     main_activity_id = None
     main_subclass = None
     main_command_ended = False
+
+    # Progress Report Begin events still waiting for their End, keyed by request,
+    # subclass, object path and start time (the same four values on both events)
+    open_objects = {}
 
     # Captured once, for the Summary Info sheet
     report_db_name = ""
@@ -472,6 +523,28 @@ def build_refresh_analysis(xml_path, output_file_path):
                 global_min_start = start_time
             if global_max_end is None or end_time > global_max_end:
                 global_max_end = end_time
+
+        # --------------------------------------------------------
+        # OBJECTS THAT STARTED BUT NEVER FINISHED
+        # --------------------------------------------------------
+        # Only the End events reach the Timeline, so an object that began and
+        # then failed, was cancelled or was still running at the end of the
+        # trace is invisible there. Its Begin without a matching End is kept.
+        if (event_name in ('Progress Report Begin', 'Progress Report End')
+                and event_subclass not in REFRESH_PHASES and columns_data.get('ObjectPath')):
+            pair_key = (request_id, event_subclass, columns_data['ObjectPath'], start_str)
+            if event_name == 'Progress Report End':
+                open_objects.pop(pair_key, None)
+            else:
+                first_line = clean_text(text_data).split('\n')[0]
+                open_objects[pair_key] = {
+                    'ObjectName': columns_data.get('ObjectName', ''),
+                    'EventSubclass': event_subclass,
+                    'Details': first_line[:150],
+                    'StartTime': parse_pbi_time(start_str),
+                    'RequestID': request_id,
+                    '_activity': activity_id
+                }
 
         # --------------------------------------------------------
         # 1. ERRORS & FAILURES
@@ -635,6 +708,7 @@ def build_refresh_analysis(xml_path, output_file_path):
         fallback_events = [e for e in fallback_events if in_refresh_session(e['_activity'])]
         job_graph_chunks = {r: c for r, c in job_graph_chunks.items()
                             if in_refresh_session(job_graph_activity.get(r, ''))}
+        open_objects = {k: v for k, v in open_objects.items() if in_refresh_session(v['_activity'])}
         for number, error in enumerate(errors_list, start=1):
             error['ID'] = number
 
@@ -664,6 +738,17 @@ def build_refresh_analysis(xml_path, output_file_path):
     else:
         total_refresh_sec = 0.0
 
+    _, refresh_ops = select_refresh_ops(events, refresh_command)
+    activity_stats = compute_activity_stats(refresh_ops)
+
+    unfinished_list = []
+    if global_max_end:
+        for obj in sorted(open_objects.values(), key=lambda o: o['StartTime'] or datetime.min):
+            if obj['StartTime']:
+                obj['Open_Until_Trace_End_Sec'] = round(
+                    max((global_max_end - obj['StartTime']).total_seconds(), 0.0), 3)
+            unfinished_list.append(obj)
+
     print("\n======================================")
     print(f"DATABASE:      {report_db_name}")
     print(f"USER:          {report_user_name}")
@@ -672,10 +757,13 @@ def build_refresh_analysis(xml_path, output_file_path):
     print(f"Errors / Failures: {len(errors_list)}")
     print(f"Execution Metrics: {len(exec_metrics_list)}")
     print(f"System Events:     {len(system_events_list)}")
+    print(f"Unfinished objects: {len(unfinished_list)}")
+    print(f"Timeline: span {activity_stats['Timeline_Span_Sec']} s = busy {activity_stats['Busy_Time_Sec']} s "
+          f"+ idle {activity_stats['Idle_Time_Sec']} s")
     print("======================================\n")
 
     # Convert datetimes to display strings for both event lists
-    for record_list in (events, system_events_list):
+    for record_list in (events, system_events_list, unfinished_list):
         for ev in record_list:
             for key in ('StartTime', 'EndTime'):
                 if isinstance(ev.get(key), datetime):
@@ -685,10 +773,12 @@ def build_refresh_analysis(xml_path, output_file_path):
         'Database': report_db_name,
         'User': report_user_name,
         'StartTime': format_ts(global_min_start),
-        'EndTime': format_ts(global_max_end)
+        'EndTime': format_ts(global_max_end),
+        **activity_stats
     }]
 
-    write_excel(output_file_path, summary_data, events, system_events_list, errors_list, exec_metrics_list)
+    write_excel(output_file_path, summary_data, events, system_events_list, errors_list, exec_metrics_list,
+                unfinished_list)
     print(f"File successfully created: {output_file_path}")
 
 

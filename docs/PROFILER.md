@@ -171,5 +171,6 @@ Not *Trace File*: that is a binary `.trc` file the script cannot read.
 | The events are not in the Events list | Tick **Show all events** and **Show all columns** (step 7) |
 | No rows appear after Run | The refresh has not started yet, or it runs on another model than the one in **Connect to database** |
 | No **Job Graph** rows | The Job Graph event is not ticked (step 7) |
+| Profiler from SSMS 22 cannot connect to the workspace | A colleague could not connect with Profiler from SSMS 22; the one from SSMS 21 connected to the same workspace. Not verified further, try the older SSMS if the connection fails with the correct address |
 
 Messages of the script: [README → Troubleshooting](../README.md#troubleshooting).

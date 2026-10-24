@@ -212,6 +212,10 @@ than the engine duration in Execution Metrics.
 | Database | Semantic model: `DatabaseName` of the refresh command (the first one seen if the command has none) |
 | User | `NTUserName` of the refresh command, the account that started the refresh (the first one seen if the command has none) |
 | StartTime, EndTime | First and last event time of the processed part of the trace |
+| Timeline_Span_Sec | First Timeline start to last Timeline end of the refresh request |
+| Busy_Time_Sec | Part of the span with at least one operation running. Parallel operations count once (union of intervals) |
+| Idle_Time_Sec | `Timeline_Span_Sec − Busy_Time_Sec`: gaps with nothing running, for example waiting on the source |
+| Sum_Object_Duration_Sec | Sum of `Duration_Sec` over the Timeline. Parallel work counts several times, so it is larger than the span |
 
 ### Timeline
 
@@ -245,6 +249,20 @@ Columns: `Action`, `Duration_Sec`, `StartTime`, `RequestID`, `TextData`.
 ### Errors
 
 Columns: `ID`, `Action`, `TextData`, `Error` (error number), `ErrorCode`, `StartTime`, `RequestID`.
+
+### Unfinished
+
+Objects with a `Progress Report Begin` and no matching `Progress Report End`. Only End events reach the Timeline, so
+an object that started and then failed, was cancelled or was still running when the trace stopped is not visible
+there. Begin and End are matched on `RequestID`, `EventSubclass`, `ObjectPath` and `StartTime`; the texts differ
+("Started…" and "Finished…"), so they cannot be compared. Refresh phases (Commit, Rollback, Sequence point and so on)
+are left out. The sheet is empty when every object finished.
+
+Columns: `ObjectName`, `EventSubclass`, `Details`, `StartTime`, `Open_Until_Trace_End_Sec` (time from the start to the
+end of the processed trace), `RequestID`.
+
+A refresh can succeed with a few unfinished objects: the engine does not always log an End for a relationship build.
+Treat the sheet as a list to look at, not as an error list.
 
 ### Execution Metrics
 
@@ -353,7 +371,11 @@ operation mostly waited, usually for the data source during Process Partition.
   tested it did not fit the timeline (a 4.5 s wait recorded 0.05 s after the session was created), so it is kept in
   TextData only.
 - **Finalization is a remainder.** Commit start and end are logged to the second, so the wait before Commit and the
-  tail after it cannot be split.
+  tail after it cannot be split. If Preparation + Timeline + Commit are longer than the refresh command (the timeline
+  reaches past the command end, for example on a failed refresh), the remainder would be negative. The script shows 0,
+  puts the overshoot into the `TextData` of the row and prints a warning.
+- **Duration 0 in the Timeline** means the operation started and finished inside one timestamp of the Job Graph and
+  used no CPU. It ran; it was too short to measure.
 - **Summary Info Start / End** cover the processed part of the trace, which can be longer than the refresh.
 - **Object Duration for relationships** is the span from the first to the last relationship, not the sum of their
   durations.
