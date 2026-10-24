@@ -99,12 +99,18 @@ class SampleTraceTest(unittest.TestCase):
         # started 10:00:07, the trace ends 10:00:09.5
         self.assertAlmostEqual(row["Open_Until_Trace_End_Sec"], 2.5, places=3)
 
-    def test_summary_busy_and_idle_time(self):
-        summary = self.sheets["Summary Info"].iloc[0]
-        self.assertAlmostEqual(summary["Timeline_Span_Sec"], 6.5)
-        self.assertAlmostEqual(summary["Busy_Time_Sec"], 6.5)
-        self.assertAlmostEqual(summary["Idle_Time_Sec"], 0.0)
-        self.assertAlmostEqual(summary["Sum_Object_Duration_Sec"], 0.2 + 3.8 + 2.0 + 0.5)
+    def test_busy_and_idle_time_of_the_attempt(self):
+        row = self.sheets["Execution Metrics"].iloc[0]
+        self.assertAlmostEqual(row["Timeline_Span_Sec"], 6.5)
+        self.assertAlmostEqual(row["Busy_Time_Sec"], 6.5)
+        self.assertAlmostEqual(row["Idle_Time_Sec"], 0.0)
+        self.assertAlmostEqual(row["Sum_Object_Duration_Sec"], 0.2 + 3.8 + 2.0 + 0.5)
+
+    def test_single_attempt(self):
+        row = self.sheets["Execution Metrics"].iloc[0]
+        self.assertEqual(row["Attempt"], 1)
+        self.assertEqual(row["Attempt_Label"], "Last")
+        self.assertEqual(row["Status"], "Success")
 
     def test_other_sessions_are_not_in_errors(self):
         # the failed queries of another session are not here; only the two errors of the refresh session
@@ -141,6 +147,64 @@ class ActivityStatsTest(unittest.TestCase):
         self.assertAlmostEqual(stats["Idle_Time_Sec"], 0.0)
 
 
+TWO_ATTEMPTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "two_attempts_trace.xml")
+
+
+class TwoAttemptsTraceTest(unittest.TestCase):
+    """two_attempts_trace.xml: attempt 1 fails (4 s, Rollback, no Execution Metrics), attempt 2 succeeds (6 s)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        output = os.path.join(cls.tmp.name, "refresh_analysis.xlsx")
+        with contextlib.redirect_stdout(io.StringIO()):
+            main.build_refresh_analysis(TWO_ATTEMPTS, output)
+        cls.sheets = {name: pd.read_excel(output, sheet_name=name) for name in SHEETS}
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_one_execution_metrics_row_per_attempt(self):
+        metrics = self.sheets["Execution Metrics"]
+        self.assertEqual(list(metrics["Attempt"]), [1, 2])
+        self.assertEqual(list(metrics["Attempt_Label"].astype(str)), ["1", "Last"])
+        self.assertEqual(list(metrics["Status"]), ["Failed", "Success"])
+        self.assertEqual(list(metrics["Duration Sec"]), [4.0, 6.0])
+        # attempt 1 has no Execution Metrics event: the row comes from its Command End, memory stays empty
+        self.assertEqual(metrics.iloc[0]["Command Type"], "Refresh (no Execution Metrics)")
+        self.assertTrue(pd.isna(metrics.iloc[0]["Peak RAM GB"]))
+        self.assertAlmostEqual(metrics.iloc[1]["Peak RAM GB"], 0.5)
+
+    def test_phases_add_up_for_each_attempt(self):
+        system = self.sheets["System Events"]
+        metrics = self.sheets["Execution Metrics"].set_index("RequestID")
+        timeline = self.sheets["Timeline"]
+        for request_id, row in metrics.iterrows():
+            ops = timeline[timeline["RequestID"] == request_id]
+            span = (pd.to_datetime(ops["EndTime"]).max() - pd.to_datetime(ops["StartTime"]).min()).total_seconds()
+            phases = system[system["RequestID"] == request_id]["Duration_Sec"].sum()
+            self.assertAlmostEqual(span + phases, row["Duration Sec"], places=6, msg=request_id)
+
+    def test_phase_names_and_start_fallback(self):
+        system = self.sheets["System Events"]
+        failed = system[system["RequestID"] == "AAAA1111-0000-4000-8000-000000000101"].set_index("Action")
+        ok = system[system["RequestID"] == "BBBB2222-0000-4000-8000-000000000102"].set_index("Action")
+        # attempt 1: start from Command Begin 10:00:00, first operation 10:00:01
+        self.assertAlmostEqual(failed.loc["Preparation", "Duration_Sec"], 1.0)
+        self.assertIn("Command Begin", failed.loc["Preparation", "TextData"])
+        self.assertAlmostEqual(failed.loc["Shutdown after failure", "Duration_Sec"], 4.0 - 1.0 - 2.0 - 0.2)
+        self.assertNotIn("Finalization", failed.index)
+        # attempt 2: start from Execution Metrics 10:01:00.500
+        self.assertAlmostEqual(ok.loc["Preparation", "Duration_Sec"], 1.5)
+        self.assertAlmostEqual(ok.loc["Finalization", "Duration_Sec"], 6.0 - 1.5 - 3.0 - 0.5)
+
+    def test_errors_of_the_failed_attempt(self):
+        errors = self.sheets["Errors"]
+        self.assertEqual(set(errors["RequestID"]), {"AAAA1111-0000-4000-8000-000000000101"})
+        self.assertEqual(list(errors["ID"]), list(range(1, len(errors) + 1)))
+
+
 class SeveralAttemptsTest(unittest.TestCase):
     """A trace with earlier failed attempts: only the Rollback of the refresh request counts."""
 
@@ -153,12 +217,15 @@ class SeveralAttemptsTest(unittest.TestCase):
             {"Action": "Rollback", "Duration_Sec": 0.4, "StartTime": at(-50), "RequestID": "OLD2"},
             {"Action": "Rollback", "Duration_Sec": 0.1, "StartTime": at(71), "RequestID": "NOW"},
         ]
-        command = {"RequestID": "NOW", "Duration_Sec": 71.0}
-        main.add_refresh_phases(events, system, command, {"NOW": at(0)})
-        phases = {e["Action"]: e["Duration_Sec"] for e in system if e["Action"] in ("Preparation", "Finalization")}
+        command = {"RequestID": "NOW", "Duration_Sec": 71.0, "Success": "1", "StartTime": at(0), "EndTime": at(71)}
+        attempts = main.build_attempts({"NOW": command}, system)
+        main.add_refresh_phases(events, system, attempts, {"NOW": at(0)})
+        phases = {e["Action"]: e["Duration_Sec"] for e in system
+                  if e["Action"] in ("Preparation", "Finalization", "Shutdown after failure")}
         self.assertAlmostEqual(phases["Preparation"], 11.0)
         # 71 - 11 - 59 - 0.1 = 0.9; with the old Rollbacks it would be 0.9 - 0.7 = 0.2, with more of them below 0
-        self.assertAlmostEqual(phases["Finalization"], 0.9)
+        # the Rollback makes the attempt Failed, so the remainder is called Shutdown after failure
+        self.assertAlmostEqual(phases["Shutdown after failure"], 0.9)
 
 
 class TimestampTest(unittest.TestCase):

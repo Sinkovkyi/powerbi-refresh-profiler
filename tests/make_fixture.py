@@ -1,4 +1,6 @@
-"""Build tests/fixtures/sample_refresh_trace.xml: a small synthetic Profiler trace (no real data).
+"""Build the synthetic Profiler traces in tests/fixtures (no real data):
+sample_refresh_trace.xml (one refresh with a Job Graph) and two_attempts_trace.xml (a failed attempt, then a
+successful one, without a Job Graph).
 
 The fixture is UTF-16 like a real Profiler export, so Git shows it as binary: change this script,
 not the XML, then run it and the tests:  python tests/make_fixture.py && python -m unittest discover tests
@@ -127,9 +129,49 @@ event("Query End", EventSubclass="3", StartTime="2026-09-08T10:00:10+02:00", Dur
       Success="1", ActivityID=B, RequestID="33333333-0000-4000-8000-000000000030", DatabaseName=DB,
       NTUserName="viewer@contoso.com", TextData="EVALUATE 'Sales'")
 
-ET.indent(root)
-xml = '<?xml version="1.0" encoding="utf-16"?>\n' + ET.tostring(root, encoding="unicode")
-OUTPUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "sample_refresh_trace.xml")
-with open(OUTPUT, "w", encoding="utf-16", newline="\n") as f:
-    f.write(xml)
-print(f"Written: {OUTPUT}")
+
+
+def write(tree_root, name):
+    ET.indent(tree_root)
+    xml = '<?xml version="1.0" encoding="utf-16"?>\n' + ET.tostring(tree_root, encoding="unicode")
+    output = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", name)
+    with open(output, "w", encoding="utf-16", newline="\n") as f:
+        f.write(xml)
+    print(f"Written: {output}")
+
+
+write(root, "sample_refresh_trace.xml")
+
+# ------------------------------------------------------------------
+# two_attempts_trace.xml: the same session runs the refresh twice. Attempt 1 fails, is rolled back and logs
+# no Execution Metrics; attempt 2 succeeds. No Job Graph, so the Timeline comes from Progress Report End
+# ------------------------------------------------------------------
+root = ET.Element("TraceData", xmlns=NS)
+events = ET.SubElement(root, "Events")
+R_FAIL = "AAAA1111-0000-4000-8000-000000000101"
+R_OK = "BBBB2222-0000-4000-8000-000000000102"
+for rid, t0, ok in ((R_FAIL, "10:00:00", False), (R_OK, "10:01:00", True)):
+    event("Command Begin", EventSubclass="38", StartTime=f"2026-09-08T{t0}+02:00", ActivityID=A, RequestID=rid,
+          DatabaseName=DB, NTUserName=USER, TextData=tmsl)
+# attempt 1: partition 10:00:01-10:00:03, Rollback 0.2 s, command 4 s, failed
+event("Progress Report End", EventSubclass="59", StartTime="2026-09-08T10:00:01+02:00", Duration="2000",
+      CPUTime="500", Success="1", Error="0", ActivityID=A, RequestID=R_FAIL, DatabaseName=DB, NTUserName=USER,
+      ObjectName="Sales", TextData="Finished processing the 'Sales' partition.")
+event("Progress Report End", EventSubclass="7", StartTime="2026-09-08T10:00:03+02:00", Duration="200",
+      CPUTime="0", Success="1", Error="0", ActivityID=A, RequestID=R_FAIL, DatabaseName=DB, NTUserName=USER)
+event("Command End", EventSubclass="38", StartTime="2026-09-08T10:00:00+02:00", Duration="4000", CPUTime="500",
+      Success="0", Error="-1055784777", ActivityID=A, RequestID=R_FAIL, DatabaseName=DB, NTUserName=USER,
+      TextData=tmsl)
+# attempt 2: partition 10:01:02-10:01:05, Commit 0.5 s, command 6 s, Execution Metrics from 10:01:00.500
+event("Progress Report End", EventSubclass="59", StartTime="2026-09-08T10:01:02+02:00", Duration="3000",
+      CPUTime="900", Success="1", Error="0", ActivityID=A, RequestID=R_OK, DatabaseName=DB, NTUserName=USER,
+      ObjectName="Sales", TextData="Finished processing the 'Sales' partition.")
+event("Progress Report End", EventSubclass="6", StartTime="2026-09-08T10:01:05+02:00", Duration="500",
+      CPUTime="0", Success="1", Error="0", ActivityID=A, RequestID=R_OK, DatabaseName=DB, NTUserName=USER)
+event("Command End", EventSubclass="38", StartTime="2026-09-08T10:01:00+02:00", Duration="6000", CPUTime="900",
+      Success="1", ActivityID=A, RequestID=R_OK, DatabaseName=DB, NTUserName=USER, TextData=tmsl)
+event("Execution Metrics", CurrentTime="2026-09-08T10:01:07+02:00", ActivityID=A, RequestID=R_OK, DatabaseName=DB,
+      TextData=json.dumps({"timeStart": "2026-09-08T10:01:00.500Z", "timeEnd": "2026-09-08T10:01:06.500Z",
+                           "durationMs": 6000, "totalCpuTimeMs": 900, "approximatePeakMemConsumptionKB": 524288,
+                           "commandType": "Batch", "refreshParallelism": 1}))
+write(root, "two_attempts_trace.xml")

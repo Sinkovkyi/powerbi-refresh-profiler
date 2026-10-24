@@ -5,14 +5,14 @@ Reads a SQL Server Profiler trace of a Power BI semantic model refresh
 (saved as a Trace XML file) and writes refresh_analysis.xlsx,
 which the Power BI report uses as its data source:
 
-    Summary Info       database, user, trace start and end,
-                       busy / idle time of the Timeline
+    Summary Info       database, user, trace start and end
     Timeline           every processed object (partition, column, hierarchy,
                        relationship) with its thread, duration and CPU time
     System Events      Preparation, Finalization, Commit/Rollback and Lock Wait;
                        Timeline span + these durations = refresh duration
     Errors             Error events and every failed or cancelled End event
-    Execution Metrics  duration, peak memory and CPU of the refresh request
+    Execution Metrics  one row per refresh attempt: duration, peak memory, CPU,
+                       attempt number and status, busy / idle time of its Timeline
     Unfinished         objects with a Progress Report Begin but no End
 
 Usage: put exactly one .xml trace next to this script and run it.
@@ -86,8 +86,12 @@ UNFINISHED_COLUMNS = [
 ]
 EXEC_METRICS_COLUMNS = [
     'Command Type', 'Refresh Parallelism', 'Duration Sec', 'Peak RAM GB',
-    'Total CPU Sec', 'M Engine CPU Sec', 'VertiPaq CPU Sec', 'StartTime', 'EndTime', 'RequestID'
+    'Total CPU Sec', 'M Engine CPU Sec', 'VertiPaq CPU Sec', 'StartTime', 'EndTime', 'RequestID',
+    'Attempt', 'Attempt_Label', 'Status',
+    'Timeline_Span_Sec', 'Busy_Time_Sec', 'Idle_Time_Sec', 'Sum_Object_Duration_Sec'
 ]
+# Name of the remainder row: a successful attempt ends with Commit, a failed one is stopped
+FINALIZATION = {'Success': "Finalization", 'Failed': "Shutdown after failure"}
 
 
 # ============================================================
@@ -288,13 +292,6 @@ def assign_fallback_threads(fallback_events):
     return fallback_events
 
 
-def select_refresh_ops(events, refresh_command):
-    """Timeline rows of the refresh request. Without a Job Graph the Timeline
-    also holds other requests; only the refresh request's own operations count."""
-    request_id = refresh_command['RequestID'] if refresh_command else events[0]['RequestID']
-    return request_id, ([ev for ev in events if ev['RequestID'] == request_id] or events)
-
-
 def compute_activity_stats(refresh_ops):
     """Wall-clock span of the Timeline split into busy time (at least one
     operation running) and idle time (gaps with nothing running).
@@ -320,60 +317,94 @@ def compute_activity_stats(refresh_ops):
     }
 
 
-def add_refresh_phases(events, system_events_list, refresh_command, request_start_times):
-    """Add Preparation and Finalization rows to System Events so that
+def build_attempts(refresh_commands, system_events_list):
+    """Number the refresh commands of the trace by start time (1 = earliest) and give each a status.
+    A trace can hold several attempts of the same refresh: the earlier ones failed and were rolled back."""
+    attempts = sorted(refresh_commands.values(),
+                      key=lambda c: c['StartTime'].replace(tzinfo=None) if c['StartTime'] else datetime.max)
+    rolled_back = {ev.get('RequestID') for ev in system_events_list if ev['Action'] == 'Rollback'}
+    for number, attempt in enumerate(attempts, start=1):
+        attempt['Attempt'] = number
+        attempt['Attempt_Label'] = "Last" if number == len(attempts) else str(number)
+        succeeded = attempt['Success'] == '1' and attempt['RequestID'] not in rolled_back
+        attempt['Status'] = "Success" if succeeded else "Failed"
+    return attempts
+
+
+def attempt_ops(events, attempt, attempts):
+    """Timeline rows of one attempt. With a single attempt and no rows of its own (no Job Graph,
+    progress events under other RequestIDs) the whole Timeline belongs to it."""
+    ops = [ev for ev in events if ev['RequestID'] == attempt['RequestID']]
+    return ops or (events if len(attempts) == 1 else [])
+
+
+def add_refresh_phases(events, system_events_list, attempts, request_start_times):
+    """Add the Preparation and Finalization (or Shutdown after failure) rows of every attempt to
+    System Events, so that for each attempt
     Preparation + Processing (Timeline span) + Commit/Rollback + Finalization
-    equals the refresh command duration (and durationMs in Execution Metrics)."""
-    if not events:
-        return
+    equals its refresh command duration (and durationMs in Execution Metrics)."""
+    for attempt in attempts:
+        request_id = attempt['RequestID']
+        ops = attempt_ops(events, attempt, attempts)
+        if not ops:
+            continue
 
-    request_id, refresh_ops = select_refresh_ops(events, refresh_command)
+        # Timestamps are compared as wall-clock values: Execution Metrics marks them
+        # with 'Z' while the other events carry a local offset for the same clock
+        first_op = min(ev['StartTime'] for ev in ops).replace(tzinfo=None)
+        last_op = max(ev['EndTime'] for ev in ops).replace(tzinfo=None)
+        # Processing (the Timeline span) is not listed: the report takes it from the Timeline
+        processing_sec = (last_op - first_op).total_seconds()
 
-    # Timestamps are compared as wall-clock values: Execution Metrics marks them
-    # with 'Z' while the other events carry a local offset for the same clock
-    first_op = min(ev['StartTime'] for ev in refresh_ops).replace(tzinfo=None)
-    last_op = max(ev['EndTime'] for ev in refresh_ops).replace(tzinfo=None)
-    # Processing (the Timeline span) is not listed: the report takes it from the Timeline
-    processing_sec = (last_op - first_op).total_seconds()
+        preparation_note = "From the refresh command start to the first Timeline operation"
+        refresh_start = request_start_times.get(request_id)
+        if not refresh_start:
+            # No Execution Metrics for this request: the command start is logged to the second only
+            refresh_start = attempt['StartTime']
+            if not refresh_start:
+                continue
+            preparation_note += " (no Execution Metrics: start taken from Command Begin, precision 1 s)"
+        refresh_start = refresh_start.replace(tzinfo=None)
 
-    refresh_start = request_start_times.get(request_id) if refresh_command else None
-    if not refresh_start:
-        return
+        # Only the Commit / Rollback of this attempt. Counting the Rollbacks of the other
+        # attempts made Finalization negative
+        transaction_sec = sum(ev['Duration_Sec'] for ev in system_events_list
+                              if ev['Action'] in TRANSACTION_END.values() and ev.get('RequestID') == request_id)
+        preparation_sec = max((first_op - refresh_start).total_seconds(), 0.0)
 
-    refresh_start = refresh_start.replace(tzinfo=None)
-    # Only the Commit / Rollback of the refresh request itself. A trace can hold several
-    # attempts (earlier ones rolled back); counting theirs too makes Finalization negative
-    transaction_sec = sum(ev['Duration_Sec'] for ev in system_events_list
-                          if ev['Action'] in TRANSACTION_END.values() and ev.get('RequestID') == request_id)
-    preparation_sec = max((first_op - refresh_start).total_seconds(), 0.0)
-    # Finalization is the remainder: the wait before Commit plus the tail after it.
-    # Commit start/end are logged to the second, so the two cannot be split further
-    remainder_sec = refresh_command['Duration_Sec'] - preparation_sec - processing_sec - transaction_sec
-    finalization_sec = max(remainder_sec, 0.0)
-    finalization_note = "Wait before Commit/Rollback and the tail after it (remainder of the refresh duration)"
-    if remainder_sec < 0:
-        # The measured parts add up to more than the refresh command: the Timeline or
-        # Commit reach past the command end. A negative duration would be wrong, so it
-        # is shown as 0 and the overshoot is kept in the text
-        finalization_note = (f"Not a real duration: Preparation + Timeline + Commit/Rollback exceed the refresh "
-                             f"command by {-remainder_sec:.3f} s, so Finalization is shown as 0")
-        print(f"WARNING: the refresh phases exceed the refresh command duration by {-remainder_sec:.3f} s "
-              f"(Finalization set to 0).")
+        # The remainder: for a successful attempt the wait before Commit plus the tail after it
+        # (Commit start/end are logged to the second, so the two cannot be split further);
+        # for a failed one the time from the last operation to the end of the command
+        phase = FINALIZATION[attempt['Status']]
+        remainder_sec = attempt['Duration_Sec'] - preparation_sec - processing_sec - transaction_sec
+        if attempt['Status'] == "Success":
+            phase_note = "Wait before Commit and the tail after it (remainder of the refresh duration)"
+        else:
+            phase_note = ("Failed attempt: from the last Timeline operation to the end of the command, "
+                          "without Rollback (remainder of the refresh duration)")
+        if remainder_sec < 0:
+            # The measured parts add up to more than the refresh command: the Timeline or
+            # Commit reach past the command end. A negative duration would be wrong, so it
+            # is shown as 0 and the overshoot is kept in the text
+            phase_note = (f"Not a real duration: Preparation + Timeline + Commit/Rollback exceed the refresh "
+                          f"command by {-remainder_sec:.3f} s, so {phase} is shown as 0")
+            print(f"WARNING: attempt {attempt['Attempt']}: the refresh phases exceed the refresh command "
+                  f"duration by {-remainder_sec:.3f} s ({phase} set to 0).")
 
-    system_events_list.append({
-        'Action': "Preparation",
-        'Duration_Sec': round(preparation_sec, 6),
-        'StartTime': refresh_start,
-        'RequestID': request_id,
-        'TextData': "From the refresh command start to the first Timeline operation"
-    })
-    system_events_list.append({
-        'Action': "Finalization",
-        'Duration_Sec': round(finalization_sec, 6),
-        'StartTime': last_op,
-        'RequestID': request_id,
-        'TextData': finalization_note
-    })
+        system_events_list.append({
+            'Action': "Preparation",
+            'Duration_Sec': round(preparation_sec, 6),
+            'StartTime': refresh_start,
+            'RequestID': request_id,
+            'TextData': preparation_note
+        })
+        system_events_list.append({
+            'Action': phase,
+            'Duration_Sec': round(max(remainder_sec, 0.0), 6),
+            'StartTime': last_op,
+            'RequestID': request_id,
+            'TextData': phase_note
+        })
 
 
 # ============================================================
@@ -408,7 +439,7 @@ def write_excel(output_file_path, summary_data, events, system_events_list, erro
                     sort_by='StartTime', ascending=True)
         write_sheet(writer, errors_list, 'Errors', ERRORS_COLUMNS)
         write_sheet(writer, exec_metrics_list, 'Execution Metrics', EXEC_METRICS_COLUMNS,
-                    sort_by='Duration Sec')
+                    sort_by='Attempt', ascending=True)
         write_sheet(writer, unfinished_list, 'Unfinished', UNFINISHED_COLUMNS,
                     sort_by='StartTime', ascending=True)
 
@@ -423,7 +454,9 @@ def build_refresh_analysis(xml_path, output_file_path):
 
     # Whole refresh command (Command End) and request start times (Execution Metrics),
     # used to split the refresh into non-overlapping System Events rows
-    refresh_command = None
+    # Every refresh command (one per attempt) and the Command Begin time of each request
+    refresh_commands = {}
+    command_begin_starts = {}
     request_start_times = {}
 
     errors_list = []
@@ -525,6 +558,9 @@ def build_refresh_analysis(xml_path, output_file_path):
                 global_min_start = start_time
             if global_max_end is None or end_time > global_max_end:
                 global_max_end = end_time
+
+        if event_name == 'Command Begin' and event_subclass == REFRESH_COMMAND_SUBCLASS and start_time:
+            command_begin_starts.setdefault(request_id, start_time)
 
         # --------------------------------------------------------
         # OBJECTS THAT STARTED BUT NEVER FINISHED
@@ -663,7 +699,14 @@ def build_refresh_analysis(xml_path, output_file_path):
 
                 # Refresh phases and the refresh command itself stay off the Timeline
                 if event_name == 'Command End' and event_subclass == REFRESH_COMMAND_SUBCLASS:
-                    refresh_command = {'RequestID': request_id, 'Duration_Sec': dur_sec}
+                    refresh_commands[request_id] = {
+                        'RequestID': request_id,
+                        'Duration_Sec': dur_sec,
+                        'Success': success_status,
+                        'StartTime': command_begin_starts.get(request_id, start_time),
+                        'EndTime': end_time,
+                        '_activity': activity_id
+                    }
                 elif event_name == 'Progress Report End' and event_subclass in REFRESH_PHASES:
                     if event_subclass in TRANSACTION_END:
                         system_events_list.append({
@@ -712,6 +755,7 @@ def build_refresh_analysis(xml_path, output_file_path):
         job_graph_chunks = {r: c for r, c in job_graph_chunks.items()
                             if in_refresh_session(job_graph_activity.get(r, ''))}
         open_objects = {k: v for k, v in open_objects.items() if in_refresh_session(v['_activity'])}
+        refresh_commands = {k: v for k, v in refresh_commands.items() if in_refresh_session(v['_activity'])}
 
     # Oldest first: ID 1 is the earliest error of the trace, the likely root cause. The trace lists
     # events in the order they finish, so a failure is logged after the errors that led to it.
@@ -734,20 +778,40 @@ def build_refresh_analysis(xml_path, output_file_path):
 
     events.sort(key=lambda x: x['StartTime'])
 
-    add_refresh_phases(events, system_events_list, refresh_command, request_start_times)
+    attempts = build_attempts(refresh_commands, system_events_list)
+    add_refresh_phases(events, system_events_list, attempts, request_start_times)
 
-    # Execution Metrics keeps only the refresh request; the small service requests
+    # Execution Metrics: one row per attempt (refresh command). The small service requests
     # around it (ActAs, Discover batches, system commands) are dropped
-    refresh_ids = {refresh_command['RequestID']} if refresh_command else {ev['RequestID'] for ev in events}
-    exec_metrics_list = [em for em in exec_metrics_list if em['RequestID'] in refresh_ids]
+    if attempts:
+        by_request = {a['RequestID']: a for a in attempts}
+        exec_metrics_list = [em for em in exec_metrics_list if em['RequestID'] in by_request]
+        with_metrics = {em['RequestID'] for em in exec_metrics_list}
+        for attempt in attempts:
+            if attempt['RequestID'] not in with_metrics:
+                # A failed attempt may log no Execution Metrics. It still needs its row: the report
+                # takes the list of attempts from this sheet. Memory and CPU stay empty
+                exec_metrics_list.append({
+                    'Command Type': "Refresh (no Execution Metrics)",
+                    'Duration Sec': round(attempt['Duration_Sec'], 4),
+                    'StartTime': format_ts(attempt['StartTime']),
+                    'EndTime': format_ts(attempt['EndTime']),
+                    'RequestID': attempt['RequestID']
+                })
+        for em in exec_metrics_list:
+            attempt = by_request[em['RequestID']]
+            em.update({key: attempt[key] for key in ('Attempt', 'Attempt_Label', 'Status')})
+            ops = attempt_ops(events, attempt, attempts)
+            if ops:
+                em.update(compute_activity_stats(ops))
+    else:
+        refresh_ids = {ev['RequestID'] for ev in events}
+        exec_metrics_list = [em for em in exec_metrics_list if em['RequestID'] in refresh_ids]
 
     if global_min_start and global_max_end:
         total_refresh_sec = round((global_max_end - global_min_start).total_seconds(), 6)
     else:
         total_refresh_sec = 0.0
-
-    _, refresh_ops = select_refresh_ops(events, refresh_command)
-    activity_stats = compute_activity_stats(refresh_ops)
 
     unfinished_list = []
     if global_max_end:
@@ -766,8 +830,9 @@ def build_refresh_analysis(xml_path, output_file_path):
     print(f"Execution Metrics: {len(exec_metrics_list)}")
     print(f"System Events:     {len(system_events_list)}")
     print(f"Unfinished objects: {len(unfinished_list)}")
-    print(f"Timeline: span {activity_stats['Timeline_Span_Sec']} s = busy {activity_stats['Busy_Time_Sec']} s "
-          f"+ idle {activity_stats['Idle_Time_Sec']} s")
+    for attempt in attempts:
+        print(f"Attempt {attempt['Attempt']} ({attempt['Status']}): {round(attempt['Duration_Sec'], 3)} s, "
+              f"RequestID {attempt['RequestID']}")
     print("======================================\n")
 
     # Convert datetimes to display strings for both event lists
@@ -781,8 +846,7 @@ def build_refresh_analysis(xml_path, output_file_path):
         'Database': report_db_name,
         'User': report_user_name,
         'StartTime': format_ts(global_min_start),
-        'EndTime': format_ts(global_max_end),
-        **activity_stats
+        'EndTime': format_ts(global_max_end)
     }]
 
     write_excel(output_file_path, summary_data, events, system_events_list, errors_list, exec_metrics_list,

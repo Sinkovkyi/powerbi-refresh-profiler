@@ -163,7 +163,8 @@ Listing the nested phases would count the same seconds twice, and the System Eve
    `TextData` (`LockType`, `ObjectPath`, `BlockedSPID`, `BlockingSPID`, `WaitTime`). Deadlock events are not listed:
    the command cancelled by a deadlock already appears in Errors.
 
-8. **Preparation and Finalization** (`add_refresh_phases`), only for the operations of the refresh request:
+8. **Preparation and Finalization** (`add_refresh_phases`), for each attempt, from its own operations, Commit or
+   Rollback (`Shutdown after failure` instead of `Finalization` for a failed attempt):
 
    ```text
    Preparation  = first Timeline start − Execution Metrics timeStart
@@ -178,7 +179,7 @@ Listing the nested phases would count the same seconds twice, and the System Eve
    because `datetime.fromisoformat` in Python 3.10 accepts only 3 or 6 fractional digits and a full `+HH:MM` offset.
    Without it, Job Graph times such as `12:06:52.780Z` are rejected on 3.10 and the Timeline is empty.
 
-9. **Execution Metrics.** Only the refresh request is kept. Requests shorter than one second with no memory and no
+9. **Execution Metrics.** Only the refresh commands (attempts) are kept. Requests shorter than one second with no memory and no
    CPU are noise and dropped. JSON fields used:
 
    | JSON field | Column |
@@ -212,10 +213,6 @@ than the engine duration in Execution Metrics.
 | Database | Semantic model: `DatabaseName` of the refresh command (the first one seen if the command has none) |
 | User | `NTUserName` of the refresh command, the account that started the refresh (the first one seen if the command has none) |
 | StartTime, EndTime | First and last event time of the processed part of the trace |
-| Timeline_Span_Sec | First Timeline start to last Timeline end of the refresh request |
-| Busy_Time_Sec | Part of the span with at least one operation running. Parallel operations count once (union of intervals) |
-| Idle_Time_Sec | `Timeline_Span_Sec − Busy_Time_Sec`: gaps with nothing running, for example waiting on the source |
-| Sum_Object_Duration_Sec | Sum of `Duration_Sec` over the Timeline. Parallel work counts several times, so it is larger than the span |
 
 ### Timeline
 
@@ -241,10 +238,15 @@ Non-overlapping parts of the refresh that are not object processing. Sorted by s
 | Preparation | yes | Transaction start, metadata discovery, calculation scripts, up to the first node |
 | Commit | yes | Writing the new data to the model (backup and commit phases run inside it) |
 | Rollback | yes | Replaces Commit when the refresh failed or was cancelled |
-| Finalization | yes | Wait before Commit / Rollback plus the tail after it |
+| Finalization | yes | Successful attempt: wait before Commit plus the tail after it |
+| Shutdown after failure | yes | Failed attempt: from the last Timeline operation to the end of the command, without Rollback |
 | Lock Wait | empty | Another session held a lock the refresh needed. Details in TextData |
 
 Columns: `Action`, `Duration_Sec`, `StartTime`, `RequestID`, `TextData`.
+
+Preparation and Finalization (or Shutdown after failure) are written for every attempt. If an attempt has no
+Execution Metrics event, its start is taken from `Command Begin`, which is logged to the second; the Preparation row
+says so in `TextData`.
 
 ### Errors
 
@@ -270,8 +272,23 @@ Treat the sheet as a list to look at, not as an error list.
 
 ### Execution Metrics
 
-Columns: `Command Type`, `Refresh Parallelism`, `Duration Sec`, `Peak RAM GB`, `Total CPU Sec`, `M Engine CPU Sec`,
-`VertiPaq CPU Sec`, `StartTime`, `EndTime`, `RequestID`.
+One row per attempt. A trace can hold several attempts of the same refresh in one session (the earlier ones failed and
+were rolled back); each refresh command (`Command End`, subclass 38) is an attempt. The report builds its list of
+attempts (`RequestID` slicer) from this sheet, so an attempt without an Execution Metrics event still gets a row:
+`Command Type` = `Refresh (no Execution Metrics)`, duration and times from its Command Begin / End, memory and CPU
+empty.
+
+| Column | Description |
+|---|---|
+| Command Type, Refresh Parallelism, Duration Sec, Peak RAM GB, Total CPU Sec, M Engine CPU Sec, VertiPaq CPU Sec, StartTime, EndTime | From the Execution Metrics JSON (table in step 9 of the algorithm) |
+| RequestID | Key to the other sheets |
+| Attempt | 1, 2, 3… by command start, 1 = earliest |
+| Attempt_Label | `Last` for the last attempt, the number for the others. A slicer saved on `Last` shows the latest attempt of any trace |
+| Status | `Success`: Command End with `Success = 1` and no Rollback. `Failed`: everything else |
+| Timeline_Span_Sec | First Timeline start to last Timeline end of the attempt |
+| Busy_Time_Sec | Part of the span with at least one operation running. Parallel operations count once (union of intervals) |
+| Idle_Time_Sec | `Timeline_Span_Sec − Busy_Time_Sec`: gaps with nothing running, for example waiting on the source |
+| Sum_Object_Duration_Sec | Sum of `Duration_Sec` over the attempt's Timeline. Parallel work counts several times |
 
 ---
 
@@ -368,7 +385,8 @@ operation mostly waited, usually for the data source during Process Partition.
 
 ## Precision and limitations
 
-- **One refresh per trace.** Only the first refresh command is analysed.
+- **One refresh session per trace.** Reading stops when another session starts after the refresh. Several attempts
+  inside the refresh session are all kept and numbered.
 - **Job Graph precision** is one millisecond. **Without a Job Graph** it drops to one second, threads are estimated
   and Preparation is 0.
 - **Lock Wait has no duration.** The event has no `Duration` column. `WaitTime` is undocumented, and in the traces

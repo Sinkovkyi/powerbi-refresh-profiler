@@ -346,9 +346,10 @@ Profiler problems (connection, missing events, no Job Graph rows): [PROFILER.md 
 │   └── images/                    # screenshots (demo data)
 ├── tests/
 │   ├── test_main.py               # python -m unittest discover tests
-│   ├── make_fixture.py            # builds the synthetic test trace
+│   ├── make_fixture.py            # builds the synthetic test traces
 │   └── fixtures/
-│       └── sample_refresh_trace.xml
+│       ├── sample_refresh_trace.xml
+│       └── two_attempts_trace.xml
 ├── XML/                           # archive for your traces: not read by the script, ignored by Git
 ├── LICENSE
 └── README.md

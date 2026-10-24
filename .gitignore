@@ -2,6 +2,7 @@
 *.xml
 *.XML
 !tests/fixtures/sample_refresh_trace.xml
+!tests/fixtures/two_attempts_trace.xml
 XML/*
 !XML/.gitkeep
 *.xlsx
