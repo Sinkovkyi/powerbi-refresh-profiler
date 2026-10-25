@@ -251,7 +251,7 @@ says so in `TextData`.
 
 ### Errors
 
-Columns: `ID`, `Action`, `TextData`, `Error` (error number), `ErrorCode`, `StartTime`, `RequestID`.
+Columns: `ID`, `Action`, `TextData`, `Error` (error number), `StartTime`, `RequestID`.
 
 `ID` is a number from 1, assigned after sorting by `StartTime`, oldest first. Row 1 is the earliest error of the trace and
 the likely root cause; the rows after it are often consequences (cancelled commands, rollbacks). The trace lists events

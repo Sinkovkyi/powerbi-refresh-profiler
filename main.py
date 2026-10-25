@@ -80,7 +80,7 @@ TIMELINE_COLUMNS = [
     'CPU_Duration_Sec', 'Thread_ID', 'Details', 'StartTime', 'EndTime', 'RequestID'
 ]
 SYSTEM_EVENTS_COLUMNS = ['Action', 'Duration_Sec', 'StartTime', 'RequestID', 'TextData']
-ERRORS_COLUMNS = ['ID', 'Action', 'TextData', 'Error', 'ErrorCode', 'StartTime', 'RequestID']
+ERRORS_COLUMNS = ['ID', 'Action', 'TextData', 'Error', 'StartTime', 'RequestID']
 UNFINISHED_COLUMNS = [
     'ObjectName', 'EventSubclass', 'Details', 'StartTime', 'Open_Until_Trace_End_Sec', 'RequestID'
 ]
@@ -578,7 +578,6 @@ def build_refresh_analysis(xml_path, output_file_path):
                 'Action': f"{event_name} (Failed/Cancelled)" if is_failure else event_name,
                 'TextData': text_data,
                 'Error': error_msg,
-                'ErrorCode': columns_data.get('ErrorCode', ''),
                 'StartTime': format_ts(start_time, start_str),
                 'RequestID': request_id,
                 '_start': start_time,
