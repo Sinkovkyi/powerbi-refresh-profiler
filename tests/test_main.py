@@ -173,6 +173,10 @@ class TwoAttemptsTraceTest(unittest.TestCase):
         errors = self.sheets["Errors"]
         self.assertEqual(set(errors["RequestID"]), {"AAAA1111-0000-4000-8000-000000000101"})
         self.assertEqual(list(errors["ID"]), list(range(1, len(errors) + 1)))
+        # the failed refresh command is an error; its Rollback (no TextData) is only in System Events
+        self.assertEqual(list(errors["Action"]), ["Command End (Failed/Cancelled)"])
+        system = self.sheets["System Events"]
+        self.assertIn("Rollback", set(system["Action"]))
 
 
 class SeveralAttemptsTest(unittest.TestCase):

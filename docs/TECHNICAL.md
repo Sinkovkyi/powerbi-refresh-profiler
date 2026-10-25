@@ -194,8 +194,9 @@ Listing the nested phases would count the same seconds twice, and the System Eve
    | `timeStart`, `timeEnd` | StartTime, EndTime |
 
 10. **Errors.** `Error` and `Progress Report Error` events, every `Command / Progress Report / Query / Discover End`
-    with `Success = 0`, and every Rollback. A failed refresh does not always raise its own `Error` event, so the parser
-    does not rely on it alone.
+    with `Success = 0`. A failed refresh does not always raise its own `Error` event, so the parser
+    does not rely on it alone. Commit and Rollback are not listed: they carry no `TextData`, and the Rollback is already
+    in System Events with its duration.
 
 11. **Write the workbook** with `openpyxl`. Each sheet is re-indexed to its fixed column list.
 

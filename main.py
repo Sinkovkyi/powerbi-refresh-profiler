@@ -561,22 +561,21 @@ def build_refresh_analysis(xml_path, output_file_path):
         # --------------------------------------------------------
         # 1. ERRORS & FAILURES
         # --------------------------------------------------------
-        # A failed refresh does not always emit an Error event, so every
-        # End event with Success=0 and every rollback is logged as an error too.
-        # These events still go through the sections below (Timeline, System Events).
-        is_failure = event_name in FAILURE_EVENTS and success_status == '0'
-        is_rollback = event_name == 'Progress Report End' and event_subclass == '7'
+        # A failed refresh does not always emit an Error event, so every End event
+        # with Success=0 is logged as an error too. Commit and Rollback are not:
+        # they carry no TextData, and the Rollback is already in System Events
+        # with its duration. These events still go through the sections below.
+        is_failure = (event_name in FAILURE_EVENTS and success_status == '0'
+                      and not (event_name == 'Progress Report End' and event_subclass in TRANSACTION_END))
 
-        if event_name in ['Error', 'Progress Report Error'] or is_failure or is_rollback:
+        if event_name in ['Error', 'Progress Report Error'] or is_failure:
             error_msg = columns_data.get('Error', '')
-            if not error_msg and is_rollback:
-                error_msg = "Transaction rolled back due to an error"
-            elif not error_msg and is_failure:
+            if not error_msg and is_failure:
                 error_msg = "Command failed or was cancelled (Success=0)"
 
             errors_list.append({
                 'ID': len(errors_list) + 1,
-                'Action': f"{event_name} (Failed/Cancelled)" if (is_failure or is_rollback) else event_name,
+                'Action': f"{event_name} (Failed/Cancelled)" if is_failure else event_name,
                 'TextData': text_data,
                 'Error': error_msg,
                 'ErrorCode': columns_data.get('ErrorCode', ''),
