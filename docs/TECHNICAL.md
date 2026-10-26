@@ -406,7 +406,7 @@ through `dim_request`, and `ISCROSSFILTERED ( 'Main' )` would then drop System E
 | Max of Thread Parallelism | `MAX ( 'Execution Metrics'[Refresh Parallelism] )` (not used on the report pages) |
 | Sum of VertiPaq CPU Sec | `SUM ( 'Execution Metrics'[VertiPaq CPU Sec] )` |
 | Sum of M Engine CPU Sec | `SUM ( 'Execution Metrics'[M Engine CPU Sec] )` |
-| Count Errors | `COUNTROWS ( Errors ) + 0` (shows 0, not blank, when there are no errors) |
+| Count Errors | `COUNTROWS ( Errors ) + 0` (shows 0, not blank, when there are no errors). A row selected in the Errors table does not filter it |
 | Attempt Info | `"Attempt 1 of 4 · Failed"` for the selected attempt, or `"4 attempts selected"` |
 | Error Details | Full `TextData` of the error selected in the Errors table, otherwise a hint to select a row |
 | Unfinished Title | Title of the Unfinished Objects table: `"Unfinished Objects: none"` or the number of rows |
