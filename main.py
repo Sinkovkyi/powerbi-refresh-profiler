@@ -454,6 +454,7 @@ def build_refresh_analysis(xml_path, output_file_path):
     # Progress Report Begin events still waiting for their End, keyed by request,
     # subclass, object path and start time (the same four values on both events)
     open_objects = {}
+    begin_events_seen = 0
 
     # Captured once, for the Summary Info sheet
     report_db_name = ""
@@ -546,6 +547,8 @@ def build_refresh_analysis(xml_path, output_file_path):
         if (event_name in ('Progress Report Begin', 'Progress Report End')
                 and event_subclass not in REFRESH_PHASES and columns_data.get('ObjectPath')):
             pair_key = (request_id, event_subclass, columns_data['ObjectPath'], start_str)
+            if event_name == 'Progress Report Begin':
+                begin_events_seen += 1
             if event_name == 'Progress Report End':
                 open_objects.pop(pair_key, None)
             else:
@@ -807,6 +810,9 @@ def build_refresh_analysis(xml_path, output_file_path):
     print(f"Execution Metrics: {len(exec_metrics_list)}")
     print(f"System Events:     {len(system_events_list)}")
     print(f"Unfinished objects: {len(unfinished_list)}")
+    if not begin_events_seen:
+        print("WARNING: the trace has no Progress Report Begin events, so the Unfinished sheet is empty. "
+              "Add the event to the trace (see README → Events).")
     for attempt in attempts:
         print(f"Attempt {attempt['Attempt']} ({attempt['Status']}): {round(attempt['Duration_Sec'], 3)} s, "
               f"RequestID {attempt['RequestID']}")

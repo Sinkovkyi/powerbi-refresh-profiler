@@ -132,7 +132,7 @@ how each one is parsed).
 |---|---|---|---|
 | Command Events | Command Begin | Yes | The refresh session cannot be isolated from other activity in the trace |
 | Command Events | Command End | Yes | No reference refresh duration: no Preparation and Finalization rows |
-| Progress Reports | Progress Report Begin | Recommended | The Unfinished sheet (objects that started and never finished) stays empty |
+| Progress Reports | Progress Report Begin | Yes | The Unfinished sheet and the Unfinished Objects table stay empty: no objects that started and never finished |
 | Progress Reports | Progress Report End | Yes | No Commit or Rollback; no fallback timeline |
 | Progress Reports | Progress Report Error | Yes | Errors of the refresh are missing |
 | Errors and Warnings | Error | Yes | Errors of the refresh are missing |
@@ -348,6 +348,7 @@ excluded by `.gitignore`; only the anonymised demo workbook is committed.
 | `No events found. Excel file was not updated.` | The trace has no refresh | Check the events and that the refresh ran while recording |
 | `Main refresh command found` is not printed | `Command Begin` was not recorded | Add the event |
 | `WARNING: the refresh phases exceed the refresh command duration` | Timeline or Commit reach past the end of the refresh command, usually on a failed refresh | Finalization is shown as 0; the overshoot is in its `TextData` |
+| `WARNING: the trace has no Progress Report Begin events` | The event was not recorded | Add **Progress Report Begin** (Step 1, Events) and record again |
 | No Preparation / Finalization rows | `Execution Metrics` or `Command End` was not recorded | Add both events |
 | *Could not find file '…\refresh_analysis.xlsx'* when opening the template | The template points to the folder it was built in | [Step 3](#step-3-open-the-report) |
 

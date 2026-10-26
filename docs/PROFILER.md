@@ -120,7 +120,7 @@ powerbi://api.powerbi.com/v1.0/myorg/Your Workspace
 - **Execution Metrics Events:** Execution Metrics
 - **Job Graph Events:** Job Graph
 - **Locks:** Lock Waiting (recommended)
-- **Progress Reports:** Progress Report Begin (recommended), Progress Report End, Progress Report Error
+- **Progress Reports:** Progress Report Begin, Progress Report End, Progress Report Error
 - **Queries Events:** Query End (optional)
 
 Leave everything else unticked. What each event is for: [README → Events](../README.md#events).
@@ -130,8 +130,7 @@ Leave everything else unticked. What each event is for: [README → Events](../R
 <img src="images/profiler-05b-check-selection.png" width="800" alt="Only the selected events are shown">
 
 1. Untick **Show all events**. The list now shows only the events you selected.
-2. Compare it with the screenshot: 10 events in 8 categories, plus **Progress Report Begin** if you ticked it (it is
-   not on the screenshot, which was taken before the Unfinished sheet was added).
+2. Compare it with the screenshot: 11 events in 8 categories.
 3. Click **Run**. The trace starts and an empty grid opens.
 
 > **Do this setup once.** After **Run**: **File → Save As → Trace Template**, for example *Power BI refresh*. Next

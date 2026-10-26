@@ -178,6 +178,23 @@ class TwoAttemptsTraceTest(unittest.TestCase):
         self.assertIn("Rollback", set(system["Action"]))
 
 
+class ProgressReportBeginWarningTest(unittest.TestCase):
+    """Without Progress Report Begin the Unfinished sheet is always empty, so the script says so."""
+
+    def run_on(self, trace):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                main.build_refresh_analysis(trace, os.path.join(tmp, "refresh_analysis.xlsx"))
+            return out.getvalue()
+
+    def test_warning_when_the_event_is_missing(self):
+        self.assertIn("no Progress Report Begin events", self.run_on(TWO_ATTEMPTS))
+
+    def test_no_warning_when_the_event_is_traced(self):
+        self.assertNotIn("no Progress Report Begin events", self.run_on(FIXTURE))
+
+
 class SeveralAttemptsTest(unittest.TestCase):
     """A trace with earlier failed attempts: only the Rollback of the refresh request counts."""
 

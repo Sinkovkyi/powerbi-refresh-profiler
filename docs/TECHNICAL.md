@@ -82,7 +82,7 @@ flowchart TD
 |---|---|---|---|
 | Command Begin | Command Events | Yes | Finds the refresh command and its session (`ActivityID`). Without it, events of other sessions stay in the output |
 | Command End | Command Events | Yes | Subclass 38 is the whole refresh command; its `Duration` is the reference refresh duration. `Success = 0` goes to Errors |
-| Progress Report Begin | Progress Reports | Recommended | Paired with Progress Report End: a Begin without an End goes to the Unfinished sheet. Without it the sheet stays empty |
+| Progress Report Begin | Progress Reports | Yes | Paired with Progress Report End: a Begin without an End goes to the Unfinished sheet. Without it the sheet stays empty and the script prints a warning |
 | Progress Report End | Progress Reports | Yes | Subclass 6 Commit, 7 Rollback; Timeline fallback when there is no Job Graph; `Success = 0` goes to Errors |
 | Progress Report Error | Progress Reports | Yes | Errors |
 | Error | Errors and Warnings | Yes | Errors |
