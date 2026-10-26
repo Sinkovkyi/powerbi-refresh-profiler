@@ -72,8 +72,6 @@ TRANSACTION_END = {'6': "Commit", '7': "Rollback"}
 # durationMs in Execution Metrics
 REFRESH_COMMAND_SUBCLASS = '38'
 
-# Markers of the refresh command text (TMSL JSON or XMLA). Discover batches
-# (<Batch><Discover>) do not contain them, so they are not taken for the refresh
 # Events that every refresh produces, with what the output loses without them
 ALWAYS_TRACED_EVENTS = {
     'Command Begin': "the refresh session cannot be isolated from other activity",
@@ -84,6 +82,9 @@ ALWAYS_TRACED_EVENTS = {
     'Execution Metrics': "no peak memory and CPU split; Preparation starts at the command start (1 s precision)",
 }
 ROOT_ACTIVITY_RE = re.compile(r'"RootActivityId"\s*:\s*"([0-9A-Fa-f-]{36})"')
+
+# Markers of the refresh command text (TMSL JSON or XMLA). Discover batches
+# (<Batch><Discover>) do not contain them, so they are not taken for the refresh
 REFRESH_COMMAND_MARKERS = ('"refresh":', '<refresh', '<process')
 
 TIMELINE_COLUMNS = [
@@ -304,7 +305,7 @@ def assign_fallback_threads(fallback_events):
 
 def report_missing_events(events_seen):
     """Print a warning for every required event that is not in the trace. Only events that every refresh
-    produces are checked: Error, Progress Report Error, Lock Wait, Query End and Discover End appear only
+    produces are checked: Error, Progress Report Error, Lock Waiting, Query End and Discover End appear only
     when something fails or waits, so their absence proves nothing."""
     missing = [(name, effect) for name, effect in ALWAYS_TRACED_EVENTS.items() if name not in events_seen]
     if not missing:

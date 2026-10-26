@@ -94,7 +94,7 @@ flowchart TD
 
 After reading the file the script checks the events that every refresh produces (Command Begin and End, Progress
 Report Begin and End, Job Graph, Execution Metrics) and prints a warning listing the missing ones with what the output
-loses (`ALWAYS_TRACED_EVENTS` in `main.py`). Error, Progress Report Error, Lock Wait, Query End and Discover End appear
+loses (`ALWAYS_TRACED_EVENTS` in `main.py`). Error, Progress Report Error, Lock Waiting, Query End and Discover End appear
 only when something fails or waits, so their absence is not reported.
 
 Progress Report End subclasses that are refresh phases rather than object processing:
@@ -285,7 +285,7 @@ Treat the sheet as a list to look at, not as an error list.
 
 One row per attempt. A trace can hold several attempts of the same refresh in one session (the earlier ones failed and
 were rolled back); each refresh command (`Command End`, subclass 38) is an attempt. The report builds its list of
-attempts (`RequestID` slicer) from this sheet, so an attempt without an Execution Metrics event still gets a row:
+attempts (`dim_request`, the Attempt slicer) from this sheet, so an attempt without an Execution Metrics event still gets a row:
 `Command Type` = `Refresh (no Execution Metrics)`, duration and times from its Command Begin / End, memory and CPU
 empty.
 
@@ -429,7 +429,7 @@ operation mostly waited, usually for the data source during Process Partition.
   tested it did not fit the timeline (a 4.5 s wait recorded 0.05 s after the session was created), so it is kept in
   TextData only.
 - **Finalization is a remainder.** Commit start and end are logged to the second, so the wait before Commit and the
-  tail after it cannot be split. Only the Commit / Rollback of the refresh request itself is subtracted: a trace can
+  tail after it cannot be split. Only the Commit / Rollback of the attempt itself is subtracted: a trace can
   hold earlier attempts that were rolled back, and counting their Rollbacks pushed Finalization below 0 (−0.213 s on a
   trace with four attempts). If Preparation + Timeline + Commit are longer than the refresh command (the timeline
   reaches past the command end, for example on a failed refresh), the remainder would be negative. The script shows 0,
@@ -493,10 +493,11 @@ operations, 6 threads, 178.8 s), with only names replaced:
 | Lock Wait object path | `Sales Analytics/Model/Tables/Returns` |
 | Table name in the `Details` of the Unfinished sheet | `Sales` |
 
-Every number, timestamp, thread and operation type is unchanged, so the demo shows real engine behaviour.
+Every number, timestamp, thread and operation type is unchanged, so the demo shows real engine behaviour. Partition
+names, RequestIDs and internal GUIDs (`RowNumber-…`, relationship IDs) are kept; they carry no business meaning.
 
 `demo/refresh_analysis_failed_demo.xlsx` is a failed refresh: four attempts in one session, each cancelled by the
-capacity memory limit (consumed about 2.8 GB against a limit of about 2.74 GB) and rolled back. It is the data behind
+capacity memory limit (consumed 2752 to 2905 MB against a limit of 2737 to 2744 MB) and rolled back. It is the data behind
 the Errors & System Events screenshot. It was rebuilt from the report of a real trace, not from the trace itself, so:
 
 - table names, the model name, the user and the database GUID are replaced (`Work Items`, `Backlog`, `FactTimesheets`, …);
@@ -505,9 +506,9 @@ the Errors & System Events screenshot. It was rebuilt from the report of a real 
   command start (logged to the second) to the end of the Rollback, and Preparation starts at the command start. For
   attempt 1 this second-level precision makes the parts exceed the duration by 0.4 s, so its Shutdown after failure
   is 0, as the parser would show it;
-- the Unfinished sheet is empty: the source report did not have it. Partition
-names, RequestIDs and internal GUIDs (`RowNumber-…`, relationship IDs) are kept; they carry no business meaning.
-`.gitignore` excludes every `*.xlsx` except this file.
+- the Unfinished sheet is empty: the source report did not have it.
+
+`.gitignore` excludes every `*.xlsx` except these two files.
 
 ---
 

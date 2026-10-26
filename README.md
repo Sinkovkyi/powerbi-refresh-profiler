@@ -326,7 +326,7 @@ short to measure. They are not skipped.
 **An object is on the Unfinished sheet. Did the refresh fail?**
 Not necessarily. The sheet lists objects with a start event and no end event in the trace. The engine does not always
 log an end for a relationship build, and the refresh still succeeds. Check the Errors sheet for failures. The report
-shows unfinished objects only for failed attempts and leaves relationship builds out.
+shows unfinished objects only for failed attempts.
 
 **The report shows several attempts. Which one is the refresh?**
 Each refresh command in the trace session is an attempt, numbered by start time. When Power BI retries a failed refresh
