@@ -254,7 +254,7 @@ The Gantt chart is a Microsoft custom visual stored inside the file; nothing to 
   - **Commit** (or **Rollback** after a failure);
   - **Finalization**: the wait before Commit plus the tail after it, derived as the remainder;
   - **Lock Wait**: another session blocked the refresh; lock type, object and blocking SPID are in **TextData**.
-- **Refresh Attempts** lists the attempts with their status (Success or Failed). The **Attempt** slicer on this page
+- The **Attempt / Status** table lists the attempts with their status (Success or Failed). The **Attempt** slicer on this page
   allows several attempts at once.
 - **Errors** lists every error and every failed or cancelled operation, oldest first: row 1 is the earliest error,
   usually the cause, and later rows are often its consequences. The table shows the first 95 characters; click a row
@@ -295,7 +295,7 @@ The report shows how the engine executed one refresh. The conclusions for your m
 | How long did preparation, commit and the wait around commit take? | Page 3: System Events, Total System Duration |
 | Was the refresh blocked by a lock, and on which object? | Page 3: Lock Wait rows (object and blocking SPID in TextData) |
 | What failed or was cancelled, and with which error? | Page 3: Errors, Error Details |
-| Was the refresh retried, and which attempts failed? | Page 3: Refresh Attempts; **Attempt** slicer on every page |
+| Was the refresh retried, and which attempts failed? | Page 3: Attempt / Status table; **Attempt** slicer on every page |
 | Which tables were being processed when a refresh failed? | Page 3: Unfinished Objects |
 | What was the peak memory, and how was CPU split between the M engine and VertiPaq? | Page 1: Peak RAM GB, VertiPaq CPU Sec, M Engine CPU Sec |
 
