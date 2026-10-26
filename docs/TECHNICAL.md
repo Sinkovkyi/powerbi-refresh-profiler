@@ -253,6 +253,10 @@ says so in `TextData`.
 
 Columns: `ID`, `Action`, `TextData`, `Error` (error number), `StartTime`, `RequestID`.
 
+Some `Error` events of a failed refresh have no `RequestID`. Their text starts with `{"RootActivityId":"…"}`, which is
+the RequestID of the failed command, so the parser takes it from there. Without it the cause of the failure would not
+be linked to its attempt, and the Attempt slicer in the report would hide it.
+
 `ID` is a number from 1, assigned after sorting by `StartTime`, oldest first. Row 1 is the earliest error of the trace and
 the likely root cause; the rows after it are often consequences (cancelled commands, rollbacks). The trace lists events
 in the order they finish, so without the sort the failure would come before the errors that caused it.

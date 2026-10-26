@@ -162,6 +162,9 @@ event("Progress Report End", EventSubclass="7", StartTime="2026-09-08T10:00:03+0
 event("Command End", EventSubclass="38", StartTime="2026-09-08T10:00:00+02:00", Duration="4000", CPUTime="500",
       Success="0", Error="-1055784777", ActivityID=A, RequestID=R_FAIL, DatabaseName=DB, NTUserName=USER,
       TextData=tmsl)
+# the cause of the failure: an Error event without RequestID, linked to the attempt only through RootActivityId
+event("Error", EventSubclass="1", Error="3", StartTime="2026-09-08T10:00:04+02:00", ActivityID=A, DatabaseName=DB,
+      NTUserName=USER, TextData='{"RootActivityId":"' + R_FAIL.lower() + '"} Resource Governance: out of memory.')
 # attempt 2: partition 10:01:02-10:01:05, Commit 0.5 s, command 6 s, Execution Metrics from 10:01:00.500
 event("Progress Report End", EventSubclass="59", StartTime="2026-09-08T10:01:02+02:00", Duration="3000",
       CPUTime="900", Success="1", Error="0", ActivityID=A, RequestID=R_OK, DatabaseName=DB, NTUserName=USER,

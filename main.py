@@ -73,6 +73,7 @@ REFRESH_COMMAND_SUBCLASS = '38'
 
 # Markers of the refresh command text (TMSL JSON or XMLA). Discover batches
 # (<Batch><Discover>) do not contain them, so they are not taken for the refresh
+ROOT_ACTIVITY_RE = re.compile(r'"RootActivityId"\s*:\s*"([0-9A-Fa-f-]{36})"')
 REFRESH_COMMAND_MARKERS = ('"refresh":', '<refresh', '<process')
 
 TIMELINE_COLUMNS = [
@@ -572,13 +573,20 @@ def build_refresh_analysis(xml_path, output_file_path):
             if not error_msg and is_failure:
                 error_msg = "Command failed or was cancelled (Success=0)"
 
+            # Some Error events of a failed refresh come without a RequestID; their text then
+            # starts with {"RootActivityId":"…"}, which is the RequestID of the failed command
+            error_request_id = request_id
+            if not error_request_id:
+                root = ROOT_ACTIVITY_RE.search(text_data or '')
+                error_request_id = root.group(1).upper() if root else ''
+
             errors_list.append({
                 'ID': len(errors_list) + 1,
                 'Action': f"{event_name} (Failed/Cancelled)" if is_failure else event_name,
                 'TextData': text_data,
                 'Error': error_msg,
                 'StartTime': format_ts(start_time, start_str),
-                'RequestID': request_id,
+                'RequestID': error_request_id,
                 '_start': start_time,
                 '_activity': activity_id
             })
