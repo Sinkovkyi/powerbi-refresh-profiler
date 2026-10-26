@@ -348,7 +348,7 @@ excluded by `.gitignore`; only the anonymised demo workbook is committed.
 | `No events found. Excel file was not updated.` | The trace has no refresh | Check the events and that the refresh ran while recording |
 | `Main refresh command found` is not printed | `Command Begin` was not recorded | Add the event |
 | `WARNING: the refresh phases exceed the refresh command duration` | Timeline or Commit reach past the end of the refresh command, usually on a failed refresh | Finalization is shown as 0; the overshoot is in its `TextData` |
-| `WARNING: the trace has no Progress Report Begin events` | The event was not recorded | Add **Progress Report Begin** (Step 1, Events) and record again |
+| `WARNING: required events are missing in the trace` | Some events were not ticked in Profiler; the message lists them and what the output loses | Tick them (Step 1, Events) and record again. Error, Progress Report Error, Lock Waiting, Query End and Discover End cannot be checked this way: they appear only when something fails or waits |
 | No Preparation / Finalization rows | `Execution Metrics` or `Command End` was not recorded | Add both events |
 | *Could not find file '…\refresh_analysis.xlsx'* when opening the template | The template points to the folder it was built in | [Step 3](#step-3-open-the-report) |
 

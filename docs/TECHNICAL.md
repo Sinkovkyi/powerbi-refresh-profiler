@@ -82,7 +82,7 @@ flowchart TD
 |---|---|---|---|
 | Command Begin | Command Events | Yes | Finds the refresh command and its session (`ActivityID`). Without it, events of other sessions stay in the output |
 | Command End | Command Events | Yes | Subclass 38 is the whole refresh command; its `Duration` is the reference refresh duration. `Success = 0` goes to Errors |
-| Progress Report Begin | Progress Reports | Yes | Paired with Progress Report End: a Begin without an End goes to the Unfinished sheet. Without it the sheet stays empty and the script prints a warning |
+| Progress Report Begin | Progress Reports | Yes | Paired with Progress Report End: a Begin without an End goes to the Unfinished sheet. Without it the sheet stays empty |
 | Progress Report End | Progress Reports | Yes | Subclass 6 Commit, 7 Rollback; Timeline fallback when there is no Job Graph; `Success = 0` goes to Errors |
 | Progress Report Error | Progress Reports | Yes | Errors |
 | Error | Errors and Warnings | Yes | Errors |
@@ -91,6 +91,11 @@ flowchart TD
 | Lock Wait | Locks (*Lock Waiting* in the Profiler UI) | Recommended | Lock Wait rows in System Events |
 | Query End | Queries Events | Optional | `Success = 0` goes to Errors |
 | Discover End | Discover Events | Optional | `Success = 0` goes to Errors |
+
+After reading the file the script checks the events that every refresh produces (Command Begin and End, Progress
+Report Begin and End, Job Graph, Execution Metrics) and prints a warning listing the missing ones with what the output
+loses (`ALWAYS_TRACED_EVENTS` in `main.py`). Error, Progress Report Error, Lock Wait, Query End and Discover End appear
+only when something fails or waits, so their absence is not reported.
 
 Progress Report End subclasses that are refresh phases rather than object processing:
 

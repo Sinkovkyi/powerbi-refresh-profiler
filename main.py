@@ -74,6 +74,15 @@ REFRESH_COMMAND_SUBCLASS = '38'
 
 # Markers of the refresh command text (TMSL JSON or XMLA). Discover batches
 # (<Batch><Discover>) do not contain them, so they are not taken for the refresh
+# Events that every refresh produces, with what the output loses without them
+ALWAYS_TRACED_EVENTS = {
+    'Command Begin': "the refresh session cannot be isolated from other activity",
+    'Command End': "no refresh duration, no attempts, no Preparation / Finalization rows",
+    'Progress Report Begin': "the Unfinished sheet stays empty",
+    'Progress Report End': "no Commit / Rollback rows, no Timeline fallback",
+    'Job Graph': "the Timeline falls back to one-second precision without thread slots",
+    'Execution Metrics': "no peak memory and CPU split; Preparation starts at the command start (1 s precision)",
+}
 ROOT_ACTIVITY_RE = re.compile(r'"RootActivityId"\s*:\s*"([0-9A-Fa-f-]{36})"')
 REFRESH_COMMAND_MARKERS = ('"refresh":', '<refresh', '<process')
 
@@ -293,6 +302,18 @@ def assign_fallback_threads(fallback_events):
     return fallback_events
 
 
+def report_missing_events(events_seen):
+    """Print a warning for every required event that is not in the trace. Only events that every refresh
+    produces are checked: Error, Progress Report Error, Lock Wait, Query End and Discover End appear only
+    when something fails or waits, so their absence proves nothing."""
+    missing = [(name, effect) for name, effect in ALWAYS_TRACED_EVENTS.items() if name not in events_seen]
+    if not missing:
+        return
+    print("WARNING: required events are missing in the trace. Add them in Profiler (README → Events) and record again:")
+    for name, effect in missing:
+        print(f"  - {name}: {effect}")
+
+
 def build_attempts(refresh_commands, system_events_list):
     """Number the refresh commands of the trace by start time (1 = earliest) and give each a status.
     A trace can hold several attempts of the same refresh: the earlier ones failed and were rolled back."""
@@ -454,7 +475,8 @@ def build_refresh_analysis(xml_path, output_file_path):
     # Progress Report Begin events still waiting for their End, keyed by request,
     # subclass, object path and start time (the same four values on both events)
     open_objects = {}
-    begin_events_seen = 0
+    # Every event name seen in the file, to report required events that were not traced
+    events_seen = set()
 
     # Captured once, for the Summary Info sheet
     report_db_name = ""
@@ -465,6 +487,7 @@ def build_refresh_analysis(xml_path, output_file_path):
             continue
 
         event_name = elem.get('name')
+        events_seen.add(event_name)
 
         columns_data = {}
         for col in elem:
@@ -547,8 +570,6 @@ def build_refresh_analysis(xml_path, output_file_path):
         if (event_name in ('Progress Report Begin', 'Progress Report End')
                 and event_subclass not in REFRESH_PHASES and columns_data.get('ObjectPath')):
             pair_key = (request_id, event_subclass, columns_data['ObjectPath'], start_str)
-            if event_name == 'Progress Report Begin':
-                begin_events_seen += 1
             if event_name == 'Progress Report End':
                 open_objects.pop(pair_key, None)
             else:
@@ -810,13 +831,11 @@ def build_refresh_analysis(xml_path, output_file_path):
     print(f"Execution Metrics: {len(exec_metrics_list)}")
     print(f"System Events:     {len(system_events_list)}")
     print(f"Unfinished objects: {len(unfinished_list)}")
-    if not begin_events_seen:
-        print("WARNING: the trace has no Progress Report Begin events, so the Unfinished sheet is empty. "
-              "Add the event to the trace (see README → Events).")
     for attempt in attempts:
         print(f"Attempt {attempt['Attempt']} ({attempt['Status']}): {round(attempt['Duration_Sec'], 3)} s, "
               f"RequestID {attempt['RequestID']}")
     print("======================================\n")
+    report_missing_events(events_seen)
 
     # Convert datetimes to display strings for both event lists
     for record_list in (events, system_events_list, unfinished_list):

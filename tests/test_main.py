@@ -178,8 +178,8 @@ class TwoAttemptsTraceTest(unittest.TestCase):
         self.assertIn("Rollback", set(system["Action"]))
 
 
-class ProgressReportBeginWarningTest(unittest.TestCase):
-    """Without Progress Report Begin the Unfinished sheet is always empty, so the script says so."""
+class MissingEventsWarningTest(unittest.TestCase):
+    """Required events that every refresh produces are reported when the trace lacks them."""
 
     def run_on(self, trace):
         with tempfile.TemporaryDirectory() as tmp:
@@ -188,11 +188,16 @@ class ProgressReportBeginWarningTest(unittest.TestCase):
                 main.build_refresh_analysis(trace, os.path.join(tmp, "refresh_analysis.xlsx"))
             return out.getvalue()
 
-    def test_warning_when_the_event_is_missing(self):
-        self.assertIn("no Progress Report Begin events", self.run_on(TWO_ATTEMPTS))
+    def test_missing_events_are_listed(self):
+        # two_attempts_trace.xml has no Progress Report Begin and no Job Graph
+        output = self.run_on(TWO_ATTEMPTS)
+        self.assertIn("required events are missing", output)
+        self.assertIn("- Progress Report Begin:", output)
+        self.assertIn("- Job Graph:", output)
+        self.assertNotIn("- Command End:", output)
 
-    def test_no_warning_when_the_event_is_traced(self):
-        self.assertNotIn("no Progress Report Begin events", self.run_on(FIXTURE))
+    def test_no_warning_when_all_are_traced(self):
+        self.assertNotIn("required events are missing", self.run_on(FIXTURE))
 
 
 class SeveralAttemptsTest(unittest.TestCase):
