@@ -22,9 +22,9 @@ recording of the refresh, a Python parser, and a Power BI report that shows:
 |---|---|
 | **Input** | A SQL Server Profiler trace of one refresh, saved as Trace XML, recorded through the XMLA endpoint |
 | **Engine data used** | Job Graph (millisecond timeline, thread slots, CPU per object), Execution Metrics (engine duration, peak memory, CPU split), Command and Progress Report events (commit, rollback, failures), Lock Waiting |
-| **Output** | `refresh_analysis.xlsx` with 5 sheets, read by a 3-page Power BI template |
+| **Output** | `refresh_analysis.xlsx` with 6 sheets, read by a 3-page Power BI template |
 | **Accuracy** | The Timeline span plus the System Events adds up to the engine's own `durationMs`; checked on real traces and by the tests in `tests/` |
-| **Scope** | One refresh per trace. Tested on Import-mode models in the Power BI Service |
+| **Scope** | One refresh session per trace; repeated attempts inside it are numbered and shown one by one. Tested on Import-mode models in the Power BI Service |
 | **Stack** | Python 3.10+ with `pandas` and `openpyxl`; Power BI Desktop; SQL Server Profiler 18.9+ |
 
 **Documentation:** this README covers usage. [docs/TECHNICAL.md](docs/TECHNICAL.md) covers the design decisions,
@@ -179,6 +179,8 @@ TOTAL REFRESH: 179.157 sec
 Errors / Failures: 0
 Execution Metrics: 1
 System Events:     4
+Unfinished objects: 2
+Attempt 1 (Success): 178.825 s, RequestID 40328362-F5FB-491B-9A54-6DABE4CA9A53
 ======================================
 
 File successfully created: C:\PowerBI-Refresh-Profiler\refresh_analysis.xlsx
@@ -191,7 +193,7 @@ report shows as **Total Duration** (179.157 vs. 178.83 seconds here).
 
 ## Step 3. Open the report
 
-`refresh_trace_report.pbit` is a template: model, measures and visuals, no data. Its five queries point to the folder
+`refresh_trace_report.pbit` is a template: model, measures and visuals, no data. Its queries point to the folder
 it was built in, so the first start needs one change of the data source.
 
 1. Open the template. A **Refresh** window reports *"Could not find file '…\refresh_analysis.xlsx'"* for every table.
@@ -223,8 +225,11 @@ The Gantt chart is a Microsoft custom visual stored inside the file; nothing to 
   (preparation, commit, waiting). With no slicer selected, together they make Total Duration.
 - **Object Duration** ranks the tables by the span of their processing.
 - **Thread Allocation** shows the work per thread and table.
-- **Peak RAM GB**, **VertiPaq CPU Sec** and **M Engine CPU Sec** are the engine's numbers for the whole refresh
+- **Peak RAM GB**, **VertiPaq CPU Sec** and **M Engine CPU Sec** are the engine's numbers for the selected attempt
   (Execution Metrics). **Count Thread** is the number of threads in the Timeline.
+- The **Attempt** slicer picks the refresh attempt; its header shows, for example, *Attempt 2 of 4 · Failed*. A trace
+  holds several attempts when Power BI retried a failed refresh in the same session. The first attempt is selected
+  by default.
 - **Object Trace** lists every partition, column and relationship with its duration and thread.
 - The **Details** and **Table name** slicers filter by operation type or table.
 
@@ -232,6 +237,7 @@ The Gantt chart is a Microsoft custom visual stored inside the file; nothing to 
 
 ![Execution Flow](docs/images/execution-flow.png)
 
+- The **Attempt** slicer works as on page 1.
 - **Table Concurrency** is a Gantt chart of every operation, coloured by thread. Overlapping bars ran in parallel;
   gaps mean waiting.
 - **CPU vs. Duration**: one dot per object, wall-clock seconds against CPU seconds.
@@ -246,8 +252,15 @@ The Gantt chart is a Microsoft custom visual stored inside the file; nothing to 
   - **Commit** (or **Rollback** after a failure);
   - **Finalization**: the wait before Commit plus the tail after it, derived as the remainder;
   - **Lock Wait**: another session blocked the refresh; lock type, object and blocking SPID are in **TextData**.
-- The **gauge** shows System Duration against the full refresh.
-- **Errors** lists every error and every failed or cancelled operation.
+- **Refresh Attempts** lists the attempts with their status (Success or Failed). The **Attempt** slicer on this page
+  allows several attempts at once.
+- **Errors** lists every error and every failed or cancelled operation, oldest first: row 1 is the earliest error,
+  usually the cause, and later rows are often its consequences. The table shows the first 95 characters; click a row
+  to see the full text in **Error Details**. The **Errors action** slicer filters by event type: `Error` is the
+  server's own message, `Progress Report Error` the failure of one table or partition, `Command End (Failed/Cancelled)`
+  the failed refresh command.
+- **Unfinished Objects** lists tables and partitions that started but logged no end, for failed attempts only: what
+  was being processed when the refresh broke. On a successful refresh it shows *none*.
 
 ### Operation types
 
@@ -277,9 +290,11 @@ The report shows how the engine executed one refresh. The conclusions for your m
 | How much of an operation's wall-clock time was CPU? | Page 2: CPU vs. Duration, CPU Intensity |
 | How many threads worked, and how was the work spread across them? | Page 1: Count Thread, Thread Allocation |
 | What ran in parallel, and in which order? | Page 2: Table Concurrency |
-| How long did preparation, commit and the wait around commit take? | Page 3: System Events, gauge |
+| How long did preparation, commit and the wait around commit take? | Page 3: System Events, Total System Duration |
 | Was the refresh blocked by a lock, and on which object? | Page 3: Lock Wait rows (object and blocking SPID in TextData) |
-| What failed or was cancelled, and with which error? | Page 3: Errors |
+| What failed or was cancelled, and with which error? | Page 3: Errors, Error Details |
+| Was the refresh retried, and which attempts failed? | Page 3: Refresh Attempts; **Attempt** slicer on every page |
+| Which tables were being processed when a refresh failed? | Page 3: Unfinished Objects |
 | What was the peak memory, and how was CPU split between the M engine and VertiPaq? | Page 1: Peak RAM GB, VertiPaq CPU Sec, M Engine CPU Sec |
 
 Not covered:
@@ -307,7 +322,13 @@ short to measure. They are not skipped.
 
 **An object is on the Unfinished sheet. Did the refresh fail?**
 Not necessarily. The sheet lists objects with a start event and no end event in the trace. The engine does not always
-log an end for a relationship build, and the refresh still succeeds. Check the Errors sheet for failures.
+log an end for a relationship build, and the refresh still succeeds. Check the Errors sheet for failures. The report
+shows unfinished objects only for failed attempts and leaves relationship builds out.
+
+**The report shows several attempts. Which one is the refresh?**
+Each refresh command in the trace session is an attempt, numbered by start time. When Power BI retries a failed refresh
+in the same session, the earlier attempts are rolled back and the last one is the final result. Their errors are
+usually the same; compare them on page 3.
 
 **Is my data sent anywhere?**
 No. Everything runs locally. Traces (`.xml`) and workbooks (`.xlsx`) contain model, server and user names and are

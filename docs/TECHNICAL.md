@@ -53,7 +53,7 @@ flowchart TD
   event of another session after the refresh. A 20.5 MB trace took 0.35 s and 1.0 s on the two environments in
   [Tested with](#tested-with).
 - Paths are resolved from the script folder (`SCRIPT_DIR`), not from the working directory.
-- The workbook always gets all five sheets with all columns, even when a sheet has no rows, so the Power Query steps
+- The workbook always gets all six sheets with all columns, even when a sheet has no rows, so the Power Query steps
   in the report never break on a missing column.
 
 ---
@@ -314,19 +314,36 @@ so the report total matches the engine's own number.
 
 ## Report data model
 
-The report (`refresh_trace_report.pbit`) loads the five sheets as five tables. There are no relationships between them: every
-visual uses one table, and cross-table numbers are combined in measures.
+The report (`refresh_trace_report.pbit`) loads the six sheets as six tables and adds one more, `dim_request`, the list of
+refresh attempts.
 
-| Report table | Sheet |
+| Report table | Source |
 |---|---|
-| Main | Timeline |
-| System Events | System Events |
-| Errors | Errors |
-| Execution Metrics | Execution Metrics |
-| Summary Info | Summary Info |
+| Main | Timeline sheet |
+| System Events | System Events sheet |
+| Errors | Errors sheet |
+| Execution Metrics | Execution Metrics sheet |
+| Unfinished | Unfinished sheet |
+| Summary Info | Summary Info sheet |
+| dim_request | Built in Power Query from Execution Metrics: `RequestID`, `Attempt`, `Status`, one row per attempt |
 
-All five queries read one source, `refresh_analysis.xlsx`. Changing it once in **Data source settings**
-updates them all.
+Relationships, all on `RequestID`:
+
+| From | To | Cardinality | Filter direction |
+|---|---|---|---|
+| Execution Metrics | dim_request | one to one | both |
+| Main | dim_request | many to one | single |
+| System Events | dim_request | many to one | single |
+| Errors | dim_request | many to one | single |
+| Unfinished | dim_request | many to one | single |
+
+Summary Info is not related: it describes the whole trace (model, user, first and last event).
+
+The **Attempt** slicer on every page filters `dim_request`, and through it every table. Pages 1 and 2 use single
+select, so their numbers always describe one attempt; page 3 allows several attempts at once. With one attempt in the
+trace the slicer has one value.
+
+All queries read one source, `refresh_analysis.xlsx`. Changing it once in **Data source settings** updates them all.
 
 ---
 
@@ -344,7 +361,9 @@ used instead of `SUM(Duration_Sec)`.
 
 ```dax
 Total Duration (HH:MM:SS) =
-VAR IsMainFiltered = ISCROSSFILTERED ( 'Main' )
+VAR IsMainFiltered =
+    ISFILTERED ( 'Main'[Details] ) || ISFILTERED ( 'Main'[TableName] )
+        || ISFILTERED ( 'Main'[ObjectName] ) || ISFILTERED ( 'Main'[Thread_ID] )
 VAR TimelineSec = [Total Parallel Time Sec]
 VAR SystemSec =
     IF ( NOT IsMainFiltered, SUM ( 'System Events'[Duration_Sec] ) )
@@ -357,8 +376,10 @@ RETURN
     FORMAT ( Hrs, "00" ) & ":" & FORMAT ( Mins, "00" ) & ":" & FORMAT ( Secs, "00" )
 ```
 
-With no filter on the Timeline this is the full refresh (Timeline span + System Events). When a table, operation type
-or thread is selected, System Events are not added, because they do not belong to one table.
+With no filter on the Timeline columns this is the full refresh of the selected attempt (Timeline span + System
+Events). When a table, operation type, object or thread is selected, System Events are not added, because they do not
+belong to one table. The check looks at the Timeline columns, not at the whole table: the Attempt slicer filters Main
+through `dim_request`, and `ISCROSSFILTERED ( 'Main' )` would then drop System Events for every attempt.
 
 | Measure | Expression |
 |---|---|
@@ -372,7 +393,13 @@ or thread is selected, System Events are not added, because they do not belong t
 | Max of Thread Parallelism | `MAX ( 'Execution Metrics'[Refresh Parallelism] )` (not used on the report pages) |
 | Sum of VertiPaq CPU Sec | `SUM ( 'Execution Metrics'[VertiPaq CPU Sec] )` |
 | Sum of M Engine CPU Sec | `SUM ( 'Execution Metrics'[M Engine CPU Sec] )` |
-| Count Errors | `DISTINCTCOUNT ( Errors[Error] )` |
+| Count Errors | `COUNTROWS ( Errors ) + 0` (shows 0, not blank, when there are no errors) |
+| Attempt Info | `"Attempt 1 of 4 · Failed"` for the selected attempt, or `"4 attempts selected"` |
+| Error Details | Full `TextData` of the error selected in the Errors table, otherwise a hint to select a row |
+| Unfinished Title | Title of the Unfinished Objects table: `"Unfinished Objects: none"` or the number of rows |
+
+`TextData Short` is a calculated column in Errors: `TextData` without line breaks, cut to 95 characters. The Errors table
+shows it; the full text is in Error Details.
 
 **Reading CPU Intensity.** Close to 100 %: the engine was busy (compression, encoding, hierarchies). Low: the
 operation mostly waited, usually for the data source during Process Partition.
@@ -404,7 +431,8 @@ operation mostly waited, usually for the data source during Process Partition.
 - **Errors typing in the report.** The Errors query types `Error` as whole number. When a failed event has no value in
   the Error column, the script writes a text placeholder (*"Command failed or was cancelled (Success=0)"*); Power
   Query then loads that cell as an error (blank in the model). With the Error
-  column traced, as in Step 1, the value is the error number. `Count Errors` counts distinct error numbers, not rows.
+  column traced, as in Step 1, the value is the error number. Its values are not documented by Microsoft; in the traces
+  tested they repeat the type of the row (for example 28 for the M query of a cancelled table), not the cause.
 
 ---
 
@@ -477,7 +505,7 @@ Before a change is merged:
 
 1. **Parser change:** run `python -m unittest discover tests`. A new rule or a bug fix gets its case in
    `tests/make_fixture.py` (run it to regenerate the fixture) and an assertion in `tests/test_main.py`. Then run
-   `main.py` on at least one real trace and compare all five sheets with the previous output. The sum
+   `main.py` on at least one real trace and compare all six sheets with the previous output. The sum
    *Timeline span + System Events* must still equal `Duration Sec` in Execution Metrics.
 2. **Python compatibility:** run the tests on Python 3.10, the oldest supported version, as well; date parsing
    differs between versions.
