@@ -132,6 +132,7 @@ how each one is parsed).
 |---|---|---|---|
 | Command Events | Command Begin | Yes | The refresh session cannot be isolated from other activity in the trace |
 | Command Events | Command End | Yes | No reference refresh duration: no Preparation and Finalization rows |
+| Progress Reports | Progress Report Begin | Recommended | The Unfinished sheet (objects that started and never finished) stays empty |
 | Progress Reports | Progress Report End | Yes | No Commit or Rollback; no fallback timeline |
 | Progress Reports | Progress Report Error | Yes | Errors of the refresh are missing |
 | Errors and Warnings | Error | Yes | Errors of the refresh are missing |
@@ -362,7 +363,8 @@ Profiler problems (connection, missing events, no Job Graph rows): [PROFILER.md 
 ├── requirements.txt               # pandas, openpyxl
 ├── refresh_trace_report.pbit      # Power BI report template (no data)
 ├── demo/
-│   └── refresh_analysis_demo.xlsx # anonymised output of a real refresh, to try the report
+│   ├── refresh_analysis_demo.xlsx        # anonymised output of a real refresh, to try the report
+│   └── refresh_analysis_failed_demo.xlsx # anonymised failed refresh with four attempts (page 3 screenshot)
 ├── docs/
 │   ├── TECHNICAL.md               # design, algorithm, workbook, DAX, limitations, maintenance
 │   ├── PROFILER.md                # click-by-click Profiler guide with screenshots

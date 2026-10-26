@@ -82,6 +82,7 @@ flowchart TD
 |---|---|---|---|
 | Command Begin | Command Events | Yes | Finds the refresh command and its session (`ActivityID`). Without it, events of other sessions stay in the output |
 | Command End | Command Events | Yes | Subclass 38 is the whole refresh command; its `Duration` is the reference refresh duration. `Success = 0` goes to Errors |
+| Progress Report Begin | Progress Reports | Recommended | Paired with Progress Report End: a Begin without an End goes to the Unfinished sheet. Without it the sheet stays empty |
 | Progress Report End | Progress Reports | Yes | Subclass 6 Commit, 7 Rollback; Timeline fallback when there is no Job Graph; `Success = 0` goes to Errors |
 | Progress Report Error | Progress Reports | Yes | Errors |
 | Error | Errors and Warnings | Yes | Errors |
@@ -96,7 +97,7 @@ Progress Report End subclasses that are refresh phases rather than object proces
 | Subclass | Name | Where it goes |
 |---|---|---|
 | 6 | Commit | System Events |
-| 7 | Rollback | System Events and Errors |
+| 7 | Rollback | System Events (not Errors: it has no TextData) |
 | 37 | Backup | Not listed: runs inside Commit |
 | 52 | Backup metadata | Not listed: runs inside Commit |
 | 57 | Tabular commit phase | Not listed: runs inside Commit |
@@ -298,6 +299,9 @@ empty.
 Preparation + Timeline span + Commit (or Rollback) + Finalization = Execution Metrics "Duration Sec"
 ```
 
+The identity holds for each attempt separately. For a failed attempt the remainder is called **Shutdown after
+failure** instead of Finalization.
+
 Example from a real trace:
 
 | Part | Seconds | Source |
@@ -445,9 +449,9 @@ operation mostly waited, usually for the data source during Process Partition.
 | Component | Version |
 |---|---|
 | Python | 3.10.12 (pandas 2.3.3), the minimum supported version, and 3.11.15 (pandas 3.0.2), including the tests in `tests/` |
-| Power BI Desktop (report built and tested) | release 2026.08 |
+| Power BI Desktop (report built and tested) | release 2026.08; template re-exported with 2026.10 (2.159.883) |
 | Engine behind the XMLA endpoint (Power BI Service) | Microsoft SQL Server 2025 Analysis Services, 17.0.88 |
-| Traces | 3 refreshes of Import-mode models in a Power BI Premium Per-User (PPU) workspace, all with Job Graph |
+| Traces | 3 refreshes of Import-mode models in a Power BI Premium Per-User (PPU) workspace, all with Job Graph. Several attempts in one session: synthetic test trace and the report (not the XML) of one failed refresh with four attempts |
 
 Not tested yet: DirectQuery or composite models, Power BI Desktop as the traced server.
 

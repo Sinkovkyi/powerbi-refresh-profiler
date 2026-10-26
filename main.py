@@ -8,7 +8,8 @@ which the Power BI report uses as its data source:
     Summary Info       database, user, trace start and end
     Timeline           every processed object (partition, column, hierarchy,
                        relationship) with its thread, duration and CPU time
-    System Events      Preparation, Finalization, Commit/Rollback and Lock Wait;
+    System Events      Preparation, Finalization (Shutdown after failure for a failed
+                       attempt), Commit/Rollback and Lock Wait; per attempt,
                        Timeline span + these durations = refresh duration
     Errors             Error events and every failed or cancelled End event
     Execution Metrics  one row per refresh attempt: duration, peak memory, CPU,
