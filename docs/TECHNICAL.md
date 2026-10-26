@@ -450,6 +450,7 @@ operations, 6 threads, 178.8 s), with only names replaced:
 | Table names | `Sales`, `Products`, `Calendar`, `KPI`, `KPI Selection` |
 | Column names | Neutral sales-domain names (`channel`, `customer_id`, `order_time`, …) |
 | Lock Wait object path | `Sales Analytics/Model/Tables/Returns` |
+| Table name in the `Details` of the Unfinished sheet | `Sales` |
 
 Every number, timestamp, thread and operation type is unchanged, so the demo shows real engine behaviour. Partition
 names, RequestIDs and internal GUIDs (`RowNumber-…`, relationship IDs) are kept; they carry no business meaning.
