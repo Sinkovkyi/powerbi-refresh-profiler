@@ -75,6 +75,8 @@ flowchart LR
 column names are replaced; all numbers are unchanged. It is the data behind the screenshots in this repository.
 
 Open `refresh_trace_report.pbit` and point it to this file as described in [Step 3](#step-3-open-the-report).
+`demo/refresh_analysis_failed_demo.xlsx` is a failed refresh with four attempts and out-of-memory errors; use it to see
+page 3 with errors.
 No Profiler, Python or Premium workspace needed.
 
 ---

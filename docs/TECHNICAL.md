@@ -484,7 +484,19 @@ operations, 6 threads, 178.8 s), with only names replaced:
 | Lock Wait object path | `Sales Analytics/Model/Tables/Returns` |
 | Table name in the `Details` of the Unfinished sheet | `Sales` |
 
-Every number, timestamp, thread and operation type is unchanged, so the demo shows real engine behaviour. Partition
+Every number, timestamp, thread and operation type is unchanged, so the demo shows real engine behaviour.
+
+`demo/refresh_analysis_failed_demo.xlsx` is a failed refresh: four attempts in one session, each cancelled by the
+capacity memory limit (consumed about 2.8 GB against a limit of about 2.74 GB) and rolled back. It is the data behind
+the Errors & System Events screenshot. It was rebuilt from the report of a real trace, not from the trace itself, so:
+
+- table names, the model name, the user and the database GUID are replaced (`Work Items`, `Backlog`, `FactTimesheets`, …);
+- Timeline, Errors and the Rollback durations are the real values; error texts are unchanged apart from the names;
+- only the last attempt had Execution Metrics in that report. For attempts 1–3 the duration is the span from the
+  command start (logged to the second) to the end of the Rollback, and Preparation starts at the command start. For
+  attempt 1 this second-level precision makes the parts exceed the duration by 0.4 s, so its Shutdown after failure
+  is 0, as the parser would show it;
+- the Unfinished sheet is empty: the source report did not have it. Partition
 names, RequestIDs and internal GUIDs (`RowNumber-…`, relationship IDs) are kept; they carry no business meaning.
 `.gitignore` excludes every `*.xlsx` except this file.
 
