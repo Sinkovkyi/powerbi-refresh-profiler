@@ -402,8 +402,8 @@ operation mostly waited, usually for the data source during Process Partition.
 - **Service changes.** Power BI does not document the Job Graph and Execution Metrics formats. If a service update
   renames a node attribute or JSON field, the matching regex or `get()` call in `main.py` needs an update.
 - **Errors typing in the report.** The Errors query types `Error` as whole number. When a failed event has no value in
-  the Error column, the script writes a text placeholder (*"Command failed or was cancelled (Success=0)"*,
-  *"Transaction rolled back…"*); Power Query then loads that cell as an error (blank in the model). With the Error
+  the Error column, the script writes a text placeholder (*"Command failed or was cancelled (Success=0)"*); Power
+  Query then loads that cell as an error (blank in the model). With the Error
   column traced, as in Step 1, the value is the error number. `Count Errors` counts distinct error numbers, not rows.
 
 ---
