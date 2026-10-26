@@ -87,7 +87,7 @@ UNFINISHED_COLUMNS = [
 EXEC_METRICS_COLUMNS = [
     'Command Type', 'Refresh Parallelism', 'Duration Sec', 'Peak RAM GB',
     'Total CPU Sec', 'M Engine CPU Sec', 'VertiPaq CPU Sec', 'StartTime', 'EndTime', 'RequestID',
-    'Attempt', 'Attempt_Label', 'Status'
+    'Attempt', 'Status'
 ]
 # Name of the remainder row: a successful attempt ends with Commit, a failed one is stopped
 FINALIZATION = {'Success': "Finalization", 'Failed': "Shutdown after failure"}
@@ -299,7 +299,6 @@ def build_attempts(refresh_commands, system_events_list):
     rolled_back = {ev.get('RequestID') for ev in system_events_list if ev['Action'] == 'Rollback'}
     for number, attempt in enumerate(attempts, start=1):
         attempt['Attempt'] = number
-        attempt['Attempt_Label'] = "Last" if number == len(attempts) else str(number)
         succeeded = attempt['Success'] == '1' and attempt['RequestID'] not in rolled_back
         attempt['Status'] = "Success" if succeeded else "Failed"
     return attempts
@@ -772,7 +771,7 @@ def build_refresh_analysis(xml_path, output_file_path):
                 })
         for em in exec_metrics_list:
             attempt = by_request[em['RequestID']]
-            em.update({key: attempt[key] for key in ('Attempt', 'Attempt_Label', 'Status')})
+            em.update({key: attempt[key] for key in ('Attempt', 'Status')})
     else:
         refresh_ids = {ev['RequestID'] for ev in events}
         exec_metrics_list = [em for em in exec_metrics_list if em['RequestID'] in refresh_ids]

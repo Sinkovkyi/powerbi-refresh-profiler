@@ -102,7 +102,6 @@ class SampleTraceTest(unittest.TestCase):
     def test_single_attempt(self):
         row = self.sheets["Execution Metrics"].iloc[0]
         self.assertEqual(row["Attempt"], 1)
-        self.assertEqual(row["Attempt_Label"], "Last")
         self.assertEqual(row["Status"], "Success")
 
     def test_other_sessions_are_not_in_errors(self):
@@ -138,7 +137,6 @@ class TwoAttemptsTraceTest(unittest.TestCase):
     def test_one_execution_metrics_row_per_attempt(self):
         metrics = self.sheets["Execution Metrics"]
         self.assertEqual(list(metrics["Attempt"]), [1, 2])
-        self.assertEqual(list(metrics["Attempt_Label"].astype(str)), ["1", "Last"])
         self.assertEqual(list(metrics["Status"]), ["Failed", "Success"])
         self.assertEqual(list(metrics["Duration Sec"]), [4.0, 6.0])
         # attempt 1 has no Execution Metrics event: the row comes from its Command End, memory stays empty

@@ -284,7 +284,6 @@ empty.
 | Command Type, Refresh Parallelism, Duration Sec, Peak RAM GB, Total CPU Sec, M Engine CPU Sec, VertiPaq CPU Sec, StartTime, EndTime | From the Execution Metrics JSON (table in step 9 of the algorithm) |
 | RequestID | Key to the other sheets |
 | Attempt | 1, 2, 3… by command start, 1 = earliest |
-| Attempt_Label | `Last` for the last attempt, the number for the others. A slicer saved on `Last` shows the latest attempt of any trace |
 | Status | `Success`: Command End with `Success = 1` and no Rollback. `Failed`: everything else |
 
 ---
