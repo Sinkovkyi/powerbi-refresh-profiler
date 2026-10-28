@@ -455,6 +455,7 @@ operation mostly waited, usually for the data source during Process Partition.
 |---|---|
 | Python | 3.10.12 (pandas 2.3.3), the minimum supported version, and 3.11.15 (pandas 3.0.2), including the tests in `tests/` |
 | Power BI Desktop (report built and tested) | release 2026.08; template re-exported with 2026.10 (2.159.883) |
+| SQL Server Profiler | From SSMS 20 and SSMS 21. Profiler from SSMS 22 did not connect to the workspace in one test |
 | Engine behind the XMLA endpoint (Power BI Service) | Microsoft SQL Server 2025 Analysis Services, 17.0.88 |
 | Traces | 3 refreshes of Import-mode models in a Power BI Premium Per-User (PPU) workspace, all with Job Graph. Several attempts in one session: synthetic test trace and the report (not the XML) of one failed refresh with four attempts |
 

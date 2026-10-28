@@ -37,6 +37,7 @@ click-by-click Profiler guide with screenshots.
 
 - [How it works](#how-it-works)
 - [Try it with demo data](#try-it-with-demo-data)
+- [Considerations and limitations](#considerations-and-limitations)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
 - [Step 1. Record a refresh in SQL Server Profiler](#step-1-record-a-refresh-in-sql-server-profiler)
@@ -81,12 +82,32 @@ No Profiler, Python or Premium workspace needed.
 
 ---
 
+## Considerations and limitations
+
+- **Pro workspaces cannot be traced.** SQL Server Profiler connects through the XMLA endpoint. It works only for a
+  workspace on Premium Per-User (PPU), Premium, Fabric or Embedded capacity with XMLA Read enabled. On a Pro workspace
+  the connection fails. Check **Workspace settings → Workspace type** before you start
+  ([PROFILER.md, step 2](docs/PROFILER.md#2-copy-the-workspace-address)).
+- **Profiler version.** Tested with Profiler from SSMS 20 and SSMS 21. Profiler from SSMS 22 did not connect to the
+  workspace in one test. Older SSMS installers are listed in Microsoft's
+  [SSMS release history](https://github.com/MicrosoftDocs/data-tools/blob/main/ssms/release-history.md) (*Fixed version installers*).
+- **Import mode only.** Tested on Import-mode models in the Power BI Service. DirectQuery and composite models are not
+  tested.
+- **No error severity.** Microsoft does not document the error codes of the trace, so the report lists errors as the
+  engine logs them, oldest first. To see the main messages, pick `Error` in the **Errors action** slicer on page 3.
+- **Unfinished objects only for failed attempts.** The engine does not log an end for every step it starts, so on a
+  successful refresh the list would show steps that did finish.
+
+More: [TECHNICAL.md → Precision and limitations](docs/TECHNICAL.md#precision-and-limitations).
+
+---
+
 ## Requirements
 
 | What | Notes |
 |---|---|
 | Python 3.10 or later | With `pandas` and `openpyxl` (`requirements.txt`) |
-| SQL Server Profiler 18.9 or later | Installed with [SQL Server Management Studio](https://learn.microsoft.com/en-us/ssms/install/install) |
+| SQL Server Profiler 18.9 or later | Installed with [SQL Server Management Studio](https://learn.microsoft.com/en-us/ssms/install/install); tested with SSMS 20 and 21 ([older versions](https://github.com/MicrosoftDocs/data-tools/blob/main/ssms/release-history.md)) |
 | Power BI Desktop | To open the report template |
 | XMLA endpoint (Read) | **Workspace type** Premium Per-User (PPU), Premium, Fabric or Embedded. Pro workspaces cannot be traced |
 | Access to the semantic model | The permissions needed to refresh it |

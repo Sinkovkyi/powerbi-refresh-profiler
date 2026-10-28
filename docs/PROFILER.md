@@ -33,6 +33,8 @@ The numbers in red circles on the screenshots match the numbers in the text.
 ## 1. Install SQL Server Profiler
 
 Profiler is installed with [SQL Server Management Studio](https://learn.microsoft.com/en-us/ssms/install/install).
+Tested with Profiler from SSMS 20 and 21. If the current SSMS does not connect (see [If something goes wrong](#if-something-goes-wrong)),
+install an older version from Microsoft's [SSMS release history](https://github.com/MicrosoftDocs/data-tools/blob/main/ssms/release-history.md), section *Fixed version installers*.
 Open it from the Start menu (*SQL Server Profiler*) or in SSMS: **Tools → SQL Server Profiler**.
 
 ---
