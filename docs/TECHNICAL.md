@@ -49,8 +49,8 @@ flowchart TD
 ```
 
 - Single file, `main.py`, standard library plus `pandas` and `openpyxl`.
-- The XML is read as a stream, so large traces do not have to fit in memory as a DOM, and the read stops at the first
-  event of another session after the refresh. A 20.5 MB trace took 0.35 s and 1.0 s on the two environments in
+- The XML is read as a stream, so large traces do not have to fit in memory as a DOM. The whole file is read; events
+  of other sessions are skipped. A 20.5 MB trace took 0.35 s and 1.0 s on the two environments in
   [Tested with](#tested-with).
 - Paths are resolved from the script folder (`SCRIPT_DIR`), not from the working directory.
 - The workbook always gets all six sheets with all columns, even when a sheet has no rows, so the Power Query steps
@@ -96,6 +96,16 @@ After reading the file the script checks the events that every refresh produces 
 Report Begin and End, Job Graph, Execution Metrics) and prints a warning listing the missing ones with what the output
 loses (`ALWAYS_TRACED_EVENTS` in `main.py`). Error, Progress Report Error, Lock Waiting, Query End and Discover End appear
 only when something fails or waits, so their absence is not reported.
+
+It also prints short warnings when the recording itself makes part of the output unreliable (`trace_warnings` in
+`main.py`). They do not change the output:
+
+| Warning | Cause | What cannot be trusted |
+|---|---|---|
+| refresh command not found | Trace started after the refresh began | Session filter: other sessions may be in every sheet |
+| refresh command(s) without Command End | Trace stopped before the refresh finished | The last attempt is missing; its open objects are on the Unfinished sheet but not in the report, which shows failed attempts from `dim_request` only |
+| refresh command has subclass …, not 38 | Refresh started by another command type | Attempts, Status, Preparation and Finalization are not built |
+| no Success column in End events | Success column not traced | A failed attempt without Rollback shows as Success; Failed/Cancelled rows are missing in Errors |
 
 Progress Report End subclasses that are refresh phases rather than object processing:
 
@@ -144,8 +154,10 @@ Listing the nested phases would count the same seconds twice, and the System Eve
    before the refresh does not reach Errors. Events without `ActivityID` are kept.
 
 4. **Detect the end.** The refresh has ended at the `Command End` with the same `RequestID` **and** the same subclass
-   as the `Command Begin`. After that the parser still reads the trailing Execution Metrics of the session, and stops
-   at the first event of another session.
+   as the `Command Begin`. The parser does not stop there: it reads the file to the end, because the service retries a
+   failed refresh in the same session, and a query of another session (someone opening a report) can be logged
+   between two attempts. Stopping at the first event of another session lost every later attempt: on a trace with
+   four attempts, one foreign query after attempt 1 left 1 attempt and 15 of 62 errors, with no error raised.
 
 5. **Build the Timeline from the Job Graph.** Job Graph text arrives in chunks per `RequestID`; `IntegerData` gives the
    order. The chunks are joined and every `<Node … />` is read:
@@ -199,6 +211,12 @@ Listing the nested phases would count the same seconds twice, and the System Eve
    | `vertipaqJobCpuTimeMs` (or total − M engine) / 1000 | VertiPaq CPU Sec |
    | `timeStart`, `timeEnd` | StartTime, EndTime |
 
+   **CPU is not wall-clock time.** Total, M Engine and VertiPaq CPU are summed across all threads and Power Query
+   (mashup) containers, so with `refreshParallelism` > 1 they can exceed the refresh duration. Example: 112.75 s of
+   M Engine CPU in a 45.82 s refresh, with 4 tables loading in parallel. M Engine CPU is spent outside the VertiPaq
+   engine, so it does not show in the Timeline `CPU_Duration_Sec`: a long partition in the Timeline with almost no CPU
+   usually means the time went to Power Query or to the data source.
+
 10. **Errors.** `Error` and `Progress Report Error` events, every `Command / Progress Report / Query / Discover End`
     with `Success = 0`. A failed refresh does not always raise its own `Error` event, so the parser
     does not rely on it alone. Commit and Rollback are not listed: they carry no `TextData`, and the Rollback is already
@@ -206,8 +224,9 @@ Listing the nested phases would count the same seconds twice, and the System Eve
 
 11. **Write the workbook** with `openpyxl`. Each sheet is re-indexed to its fixed column list.
 
-The console line `TOTAL REFRESH` is the span of the processed events (first start to last end), so it is slightly longer
-than the engine duration in Execution Metrics.
+The console line `TOTAL REFRESH` is the span from the start of the first attempt to the end of the last one, the same
+as Summary Info. With one attempt it equals the engine duration in Execution Metrics; with several it also includes the
+pauses between them.
 
 ---
 
@@ -219,7 +238,7 @@ than the engine duration in Execution Metrics.
 |---|---|
 | Database | Semantic model: `DatabaseName` of the refresh command (the first one seen if the command has none) |
 | User | `NTUserName` of the refresh command, the account that started the refresh (the first one seen if the command has none) |
-| StartTime, EndTime | First and last event time of the processed part of the trace |
+| StartTime, EndTime | Start of the first attempt and end of the last one: `timeStart` / `timeEnd` of Execution Metrics (milliseconds), or Command Begin / End when an attempt has no metrics. Events of other sessions do not move them. Without a refresh command, the Timeline span |
 
 ### Timeline
 
@@ -350,7 +369,7 @@ Relationships, all on `RequestID`:
 | Errors | dim_request | many to one | single |
 | Unfinished | dim_request | many to one | single |
 
-Summary Info is not related: it describes the whole trace (model, user, first and last event).
+Summary Info is not related: it describes the whole refresh (model, user, start of the first attempt, end of the last).
 
 The **Attempt** slicer on every page filters `dim_request`, and through it every table. Pages 1 and 2 use single
 select, so their numbers always describe one attempt; page 3 allows several attempts at once. With one attempt in the
@@ -410,9 +429,15 @@ through `dim_request`, and `ISCROSSFILTERED ( 'Main' )` would then drop System E
 | Attempt Info | `"Attempt 1 of 4 · Failed"` for the selected attempt, or `"4 attempts selected"` |
 | Error Details | Full `TextData` of the error selected in the Errors table, otherwise a hint to select a row |
 | Unfinished Title | Title of the Unfinished Objects table: `"Unfinished Objects: none"` or the number of rows |
+| Other Errors Title | Title of the Other Errors table: `"Other Errors: none"` or the number of errors with `Error Scope = "Other"` |
 
 `TextData Short` is a calculated column in Errors: `TextData` without line breaks, cut to 95 characters. The Errors table
 shows it; the full text is in Error Details.
+
+`Error Scope` is a calculated column in Errors: `"Attempt"` when the `RequestID` of the error is one of the attempts in
+Execution Metrics, otherwise `"Other"` (no RequestID, or a request of the session that is not a refresh command). The
+Errors table shows `Attempt` rows and follows the Attempt slicer; the Other Errors table shows `Other` rows and ignores
+the slicer, because those rows have no attempt to filter by. In the traces tested it is empty.
 
 **Reading CPU Intensity.** Close to 100 %: the engine was busy (compression, encoding, hierarchies). Low: the
 operation mostly waited, usually for the data source during Process Partition.
@@ -421,8 +446,8 @@ operation mostly waited, usually for the data source during Process Partition.
 
 ## Precision and limitations
 
-- **One refresh session per trace.** Reading stops when another session starts after the refresh. Several attempts
-  inside the refresh session are all kept and numbered.
+- **One refresh session per trace.** Only the session of the first refresh command is kept; the file is read to the
+  end and every other session is skipped. Several attempts inside the refresh session are all kept and numbered.
 - **Job Graph precision** is one millisecond. **Without a Job Graph** it drops to one second, threads are estimated
   and Preparation is 0.
 - **Lock Wait has no duration.** The event has no `Duration` column. `WaitTime` is undocumented, and in the traces
@@ -436,7 +461,7 @@ operation mostly waited, usually for the data source during Process Partition.
   puts the overshoot into the `TextData` of the row and prints a warning.
 - **Duration 0 in the Timeline** means the operation started and finished inside one timestamp of the Job Graph and
   used no CPU. It ran; it was too short to measure.
-- **Summary Info Start / End** cover the processed part of the trace, which can be longer than the refresh.
+- **Summary Info Start / End** cover all attempts, including the pauses between them.
 - **Object Duration for relationships** is the span from the first to the last relationship, not the sum of their
   durations.
 - **Service changes.** Power BI does not document the Job Graph and Execution Metrics formats. If a service update

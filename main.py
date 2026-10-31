@@ -5,7 +5,8 @@ Reads a SQL Server Profiler trace of a Power BI semantic model refresh
 (saved as a Trace XML file) and writes refresh_analysis.xlsx,
 which the Power BI report uses as its data source:
 
-    Summary Info       database, user, trace start and end
+    Summary Info       database, user, refresh start and end (first attempt start
+                       to last attempt end)
     Timeline           every processed object (partition, column, hierarchy,
                        relationship) with its thread, duration and CPU time
     System Events      Preparation, Finalization (Shutdown after failure for a failed
@@ -21,6 +22,7 @@ Traces kept in subfolders (e.g. XML/) are ignored.
 """
 
 import xml.etree.ElementTree as ET
+import html
 import os
 import glob
 import re
@@ -253,6 +255,8 @@ def build_timeline_from_job_graph(job_graph_chunks):
             end_match = re.search(r'FinishedAt="([^"]+)"', attrs_str)
 
             label_raw = label_match.group(1).replace('&amp;#xA;', ' ').replace('&#xA;', ' ') if label_match else ""
+            # The graph is XML inside TextData, so names keep their entities ('Issues &amp; Enhancements')
+            label_raw = html.unescape(label_raw)
             slot = int(slot_match.group(1)) if slot_match else 0
             cpu_str = cpu_match.group(1) if cpu_match else "00:00:00.000"
 
@@ -315,6 +319,27 @@ def report_missing_events(events_seen):
         print(f"  - {name}: {effect}")
 
 
+def trace_warnings(main_request_id, main_subclass, end_events_seen, success_column_seen,
+                   command_begin_starts, refresh_commands):
+    """Short warnings about a trace that was recorded in a way the parser cannot fully check.
+    They do not change the output; they say which part of it cannot be trusted."""
+    warnings = []
+    if not main_request_id:
+        warnings.append("WARNING: refresh command not found. Start the trace BEFORE the refresh: "
+                        "without it other sessions are not filtered out.")
+    elif main_subclass != REFRESH_COMMAND_SUBCLASS:
+        warnings.append(f"WARNING: refresh command has subclass {main_subclass}, not {REFRESH_COMMAND_SUBCLASS}: "
+                        "no attempts, Status, Preparation and Finalization.")
+    if end_events_seen and not success_column_seen:
+        warnings.append("WARNING: no Success column in End events. Failed attempts show as Success and "
+                        "Failed/Cancelled rows are missing in Errors. Tick the Success column in Profiler.")
+    not_ended = [r for r in command_begin_starts if r not in refresh_commands]
+    if not_ended:
+        warnings.append(f"WARNING: {len(not_ended)} refresh command(s) without Command End: the trace was stopped "
+                        "before the refresh finished. Stop it only after the refresh ends.")
+    return warnings
+
+
 def build_attempts(refresh_commands, system_events_list):
     """Number the refresh commands of the trace by start time (1 = earliest) and give each a status.
     A trace can hold several attempts of the same refresh: the earlier ones failed and were rolled back."""
@@ -333,6 +358,26 @@ def attempt_ops(events, attempt, attempts):
     progress events under other RequestIDs) the whole Timeline belongs to it."""
     ops = [ev for ev in events if ev['RequestID'] == attempt['RequestID']]
     return ops or (events if len(attempts) == 1 else [])
+
+
+def refresh_window(attempts, request_start_times, request_end_times, events):
+    """Start and end of the refresh for Summary Info: from the start of the first attempt to the end of
+    the last one. Execution Metrics times are used when present (millisecond precision), otherwise
+    Command Begin / End. Events of other sessions logged before the refresh do not move the start.
+    Without refresh commands (Command End not traced) the Timeline span is used.
+    Times are compared as wall-clock values, as in add_refresh_phases."""
+    starts, ends = [], []
+    for attempt in attempts:
+        start = request_start_times.get(attempt['RequestID']) or attempt['StartTime']
+        end = request_end_times.get(attempt['RequestID']) or attempt['EndTime']
+        if start:
+            starts.append(start.replace(tzinfo=None))
+        if end:
+            ends.append(end.replace(tzinfo=None))
+    if not starts or not ends:
+        starts = [ev['StartTime'].replace(tzinfo=None) for ev in events]
+        ends = [ev['EndTime'].replace(tzinfo=None) for ev in events]
+    return min(starts), max(ends)
 
 
 def add_refresh_phases(events, system_events_list, attempts, request_start_times):
@@ -455,6 +500,7 @@ def build_refresh_analysis(xml_path, output_file_path):
     refresh_commands = {}
     command_begin_starts = {}
     request_start_times = {}
+    request_end_times = {}
 
     errors_list = []
     exec_metrics_list = []
@@ -478,6 +524,9 @@ def build_refresh_analysis(xml_path, output_file_path):
     open_objects = {}
     # Every event name seen in the file, to report required events that were not traced
     events_seen = set()
+    # Whether End events carry the Success column: without it a failure cannot be seen
+    end_events_seen = False
+    success_column_seen = False
 
     # Captured once, for the Summary Info sheet
     report_db_name = ""
@@ -496,6 +545,10 @@ def build_refresh_analysis(xml_path, output_file_path):
                 col_name = col.get('name')
                 if col_name:
                     columns_data[col_name] = col.text if col.text is not None else ""
+
+        if event_name in FAILURE_EVENTS:
+            end_events_seen = True
+            success_column_seen = success_column_seen or 'Success' in columns_data
 
         start_str = columns_data.get('StartTime') or columns_data.get('CurrentTime', '')
         request_id = columns_data.get('RequestID', '')
@@ -527,12 +580,11 @@ def build_refresh_analysis(xml_path, output_file_path):
                 report_user_name = user_name or report_user_name
                 print(f"Main refresh command found. RequestID: {main_request_id} | ActivityID: {main_activity_id}")
 
-        # 2. Once captured, drop unrelated background activity
+        # 2. Once captured, drop unrelated background activity. The file is read to the end:
+        #    the service retries a failed refresh in the same session, and a query of another
+        #    session (someone opening a report) can arrive between the attempts
         if main_activity_id and activity_id and activity_id != main_activity_id:
             elem.clear()
-            if main_command_ended:
-                print("Final metrics collected. New session detected, stopping file read.")
-                break
             continue
 
         # 3. Mark the main command as finished (success or failure). The refresh
@@ -541,7 +593,7 @@ def build_refresh_analysis(xml_path, output_file_path):
         if (event_name == 'Command End' and not main_command_ended
                 and request_id == main_request_id and event_subclass == main_subclass):
             main_command_ended = True
-            print("Main command finished. Collecting remaining metrics...")
+            print("Main command finished. Reading the rest of the trace for retries and metrics...")
 
         # --------------------------------------------------------
         # TIME AND DURATION
@@ -644,10 +696,12 @@ def build_refresh_analysis(xml_path, output_file_path):
                     time_start_json = metrics_json.get('timeStart')
                     if time_start_json:
                         request_start_times[request_id] = parse_pbi_time(time_start_json)
+                    time_end_json = metrics_json.get('timeEnd')
+                    if time_end_json:
+                        request_end_times[request_id] = parse_pbi_time(time_end_json)
 
                     # Short requests with no memory or CPU usage are noise
                     if not (duration_ms_json < 1000 and peak_mem_kb == 0 and total_cpu_ms == 0):
-                        time_end_json = metrics_json.get('timeEnd')
                         exec_metrics_list.append({
                             'Command Type': display_name,
                             'Refresh Parallelism': metrics_json.get('refreshParallelism', ''),
@@ -777,14 +831,20 @@ def build_refresh_analysis(xml_path, output_file_path):
     else:
         events = assign_fallback_threads(fallback_events)
 
+    warnings = trace_warnings(main_request_id, main_subclass, end_events_seen, success_column_seen,
+                              command_begin_starts, refresh_commands)
+
     if not events:
         print("No events found. Excel file was not updated.")
+        for warning in warnings:
+            print(warning)
         return
 
     events.sort(key=lambda x: x['StartTime'])
 
     attempts = build_attempts(refresh_commands, system_events_list)
     add_refresh_phases(events, system_events_list, attempts, request_start_times)
+    refresh_start, refresh_end = refresh_window(attempts, request_start_times, request_end_times, events)
 
     # Execution Metrics: one row per attempt (refresh command). The small service requests
     # around it (ActAs, Discover batches, system commands) are dropped
@@ -810,10 +870,7 @@ def build_refresh_analysis(xml_path, output_file_path):
         refresh_ids = {ev['RequestID'] for ev in events}
         exec_metrics_list = [em for em in exec_metrics_list if em['RequestID'] in refresh_ids]
 
-    if global_min_start and global_max_end:
-        total_refresh_sec = round((global_max_end - global_min_start).total_seconds(), 6)
-    else:
-        total_refresh_sec = 0.0
+    total_refresh_sec = round((refresh_end - refresh_start).total_seconds(), 6)
 
     unfinished_list = []
     if global_max_end:
@@ -837,6 +894,8 @@ def build_refresh_analysis(xml_path, output_file_path):
               f"RequestID {attempt['RequestID']}")
     print("======================================\n")
     report_missing_events(events_seen)
+    for warning in warnings:
+        print(warning)
 
     # Convert datetimes to display strings for both event lists
     for record_list in (events, system_events_list, unfinished_list):
@@ -848,8 +907,8 @@ def build_refresh_analysis(xml_path, output_file_path):
     summary_data = [{
         'Database': report_db_name,
         'User': report_user_name,
-        'StartTime': format_ts(global_min_start),
-        'EndTime': format_ts(global_max_end)
+        'StartTime': format_ts(refresh_start),
+        'EndTime': format_ts(refresh_end)
     }]
 
     write_excel(output_file_path, summary_data, events, system_events_list, errors_list, exec_metrics_list,

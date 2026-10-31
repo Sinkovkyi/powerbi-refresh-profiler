@@ -52,6 +52,13 @@ class SampleTraceTest(unittest.TestCase):
         self.assertEqual(summary["Database"], "Contoso Sales")
         self.assertEqual(summary["User"], "Power BI Service (analyst@contoso.com)")
 
+    def test_summary_times_are_the_refresh_window(self):
+        # a query of another session at 09:59:58 and one after the refresh at 10:00:10 do not count:
+        # start and end come from the Execution Metrics of the refresh
+        summary = self.sheets["Summary Info"].iloc[0]
+        self.assertEqual(summary["StartTime"], "2026-09-08 10:00:00.500")
+        self.assertEqual(summary["EndTime"], "2026-09-08 10:00:09.500")
+
     def test_timeline_from_job_graph(self):
         timeline = self.sheets["Timeline"]
         self.assertEqual(len(timeline), 4)
@@ -167,6 +174,17 @@ class TwoAttemptsTraceTest(unittest.TestCase):
         self.assertAlmostEqual(ok.loc["Preparation", "Duration_Sec"], 1.5)
         self.assertAlmostEqual(ok.loc["Finalization", "Duration_Sec"], 6.0 - 1.5 - 3.0 - 0.5)
 
+    def test_other_session_between_attempts_does_not_stop_the_read(self):
+        # a query of another session at 10:00:30, after attempt 1 ended: attempt 2 is still read
+        self.assertEqual(len(self.sheets["Execution Metrics"]), 2)
+        self.assertNotIn("44444444-0000-4000-8000-000000000040", set(self.sheets["Timeline"]["RequestID"]))
+
+    def test_summary_spans_all_attempts(self):
+        # attempt 1 has no Execution Metrics: start from its Command Begin; end from the metrics of attempt 2
+        summary = self.sheets["Summary Info"].iloc[0]
+        self.assertEqual(summary["StartTime"], "2026-09-08 10:00:00.000")
+        self.assertEqual(summary["EndTime"], "2026-09-08 10:01:06.500")
+
     def test_errors_of_the_failed_attempt(self):
         errors = self.sheets["Errors"]
         self.assertEqual(set(errors["RequestID"]), {"AAAA1111-0000-4000-8000-000000000101"})
@@ -198,6 +216,47 @@ class MissingEventsWarningTest(unittest.TestCase):
 
     def test_no_warning_when_all_are_traced(self):
         self.assertNotIn("required events are missing", self.run_on(FIXTURE))
+
+
+class TraceWarningsTest(unittest.TestCase):
+    """Short warnings for a trace recorded in a way that makes part of the output unreliable."""
+
+    def warn(self, request_id="R1", subclass="38", ends=True, success=True, begins=("R1",), commands=("R1",)):
+        return " ".join(main.trace_warnings(request_id, subclass, ends, success,
+                                            dict.fromkeys(begins), dict.fromkeys(commands)))
+
+    def test_clean_trace(self):
+        self.assertEqual(self.warn(), "")
+
+    def test_refresh_command_not_found(self):
+        self.assertIn("refresh command not found", self.warn(request_id=None, begins=(), commands=()))
+
+    def test_other_subclass(self):
+        self.assertIn("subclass 12", self.warn(subclass="12", begins=(), commands=()))
+
+    def test_no_success_column(self):
+        self.assertIn("no Success column", self.warn(success=False))
+
+    def test_trace_stopped_before_the_end(self):
+        self.assertIn("1 refresh command(s) without Command End", self.warn(begins=("R1", "R2")))
+
+    def test_sample_traces_have_no_warnings(self):
+        for trace in (FIXTURE, TWO_ATTEMPTS):
+            with tempfile.TemporaryDirectory() as tmp:
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    main.build_refresh_analysis(trace, os.path.join(tmp, "refresh_analysis.xlsx"))
+            self.assertNotIn("WARNING: refresh", out.getvalue(), trace)
+            self.assertNotIn("WARNING: no Success", out.getvalue(), trace)
+
+
+class JobGraphLabelTest(unittest.TestCase):
+    def test_entities_in_names_are_decoded(self):
+        node = ('<Node Id="1" Label="Process Partition&#xA;Bugs &amp; Issues[Bugs &amp; Issues]" Slot="0" '
+                'Cpu="00:00:00.100" StartedAt="2026-09-08T10:00:01.000Z" FinishedAt="2026-09-08T10:00:02.000Z" />')
+        rows = main.build_timeline_from_job_graph({"R1": {0: node}})
+        self.assertEqual(rows[0]["TableName"], "Bugs & Issues")
+        self.assertEqual(rows[0]["ObjectName"], "Bugs & Issues[Bugs & Issues]")
 
 
 class SeveralAttemptsTest(unittest.TestCase):

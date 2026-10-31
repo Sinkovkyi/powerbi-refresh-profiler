@@ -124,7 +124,7 @@ event("Execution Metrics", CurrentTime="2026-09-08T10:00:09+02:00", ActivityID=A
       TextData=json.dumps({"timeStart": "2026-09-08T10:00:00.000Z", "timeEnd": "2026-09-08T10:00:00.020Z",
                            "durationMs": 20, "commandType": "Batch"}))
 
-# 8. Another session after the refresh: stops the reading
+# 8. Another session after the refresh: skipped, does not move the Summary end
 event("Query End", EventSubclass="3", StartTime="2026-09-08T10:00:10+02:00", Duration="50", CPUTime="0",
       Success="1", ActivityID=B, RequestID="33333333-0000-4000-8000-000000000030", DatabaseName=DB,
       NTUserName="viewer@contoso.com", TextData="EVALUATE 'Sales'")
@@ -165,6 +165,10 @@ event("Command End", EventSubclass="38", StartTime="2026-09-08T10:00:00+02:00", 
 # the cause of the failure: an Error event without RequestID, linked to the attempt only through RootActivityId
 event("Error", EventSubclass="1", Error="3", StartTime="2026-09-08T10:00:04+02:00", ActivityID=A, DatabaseName=DB,
       NTUserName=USER, TextData='{"RootActivityId":"' + R_FAIL.lower() + '"} Resource Governance: out of memory.')
+# between the attempts someone opens a report: a query of another session. It must not stop the reading
+event("Query End", EventSubclass="3", StartTime="2026-09-08T10:00:30+02:00", Duration="50", CPUTime="0",
+      Success="1", ActivityID=B, RequestID="44444444-0000-4000-8000-000000000040", DatabaseName=DB,
+      NTUserName="viewer@contoso.com", TextData="EVALUATE 'Sales'")
 # attempt 2: partition 10:01:02-10:01:05, Commit 0.5 s, command 6 s, Execution Metrics from 10:01:00.500
 event("Progress Report End", EventSubclass="59", StartTime="2026-09-08T10:01:02+02:00", Duration="3000",
       CPUTime="900", Success="1", Error="0", ActivityID=A, RequestID=R_OK, DatabaseName=DB, NTUserName=USER,

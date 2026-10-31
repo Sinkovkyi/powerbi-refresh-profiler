@@ -170,8 +170,11 @@ Other events only make the file bigger.
 ### Record and save
 
 1. **Run** the trace, then start the refresh of the same semantic model. **Job Graph** rows in the EventClass column
-   mean the trace works.
-2. When the refresh has finished: **File → Stop Trace**, then **File → Save As → Trace XML File** next to `main.py`.
+   mean the trace works. The trace must be running **before** the refresh starts: the script finds the refresh by its
+   `Command Begin`, and without it other sessions are not filtered out.
+2. When the refresh has finished, including the retries of a failed refresh: **File → Stop Trace**, then
+   **File → Save As → Trace XML File** next to `main.py`. A trace stopped in the middle of the refresh loses the last
+   attempt.
    Not *Trace File*: that is a binary `.trc` the script cannot read.
 
 One trace = one refresh. If the file contains more, the script takes the first one.
@@ -192,13 +195,12 @@ Example output (names replaced):
 ```text
 Using XML: C:\PowerBI-Refresh-Profiler\refresh_trace.xml
 Main refresh command found. RequestID: 40328362-F5FB-491B-9A54-6DABE4CA9A53 | ActivityID: B362A292-2C4C-4440-B33A-9C4BC5D036AA
-Main command finished. Collecting remaining metrics...
-Final metrics collected. New session detected, stopping file read.
+Main command finished. Reading the rest of the trace for retries and metrics...
 
 ======================================
 DATABASE:      Sales Analytics
 USER:          Power BI Service (analyst@contoso.com)
-TOTAL REFRESH: 179.157 sec
+TOTAL REFRESH: 178.825 sec
 --------------------------------------
 Errors / Failures: 0
 Execution Metrics: 1
@@ -210,8 +212,9 @@ Attempt 1 (Success): 178.825 s, RequestID 40328362-F5FB-491B-9A54-6DABE4CA9A53
 File successfully created: C:\PowerBI-Refresh-Profiler\refresh_analysis.xlsx
 ```
 
-*TOTAL REFRESH* is the span of all events of the session, so it is slightly longer than the engine duration that the
-report shows as **Total Duration** (179.157 vs. 178.83 seconds here).
+*TOTAL REFRESH* runs from the start of the first attempt to the end of the last one. With one attempt it equals the
+engine duration that the report shows as **Total Duration**; with several attempts it also includes the pauses between
+them.
 
 ---
 
@@ -283,6 +286,8 @@ The Gantt chart is a Microsoft custom visual stored inside the file; nothing to 
   to see the full text in **Error Details**. The **Errors action** slicer filters by event type: `Error` is the
   server's own message, `Progress Report Error` the failure of one table or partition, `Command End (Failed/Cancelled)`
   the failed refresh command.
+- **Other Errors** lists errors of the refresh session that belong to no attempt (no RequestID, or another request of
+  the session). It ignores the Attempt slicer and usually shows *none*.
 - **Unfinished Objects** lists tables and partitions that started but logged no end, for failed attempts only: what
   was being processed when the refresh broke. On a successful refresh it shows *none*.
 
@@ -370,6 +375,10 @@ excluded by `.gitignore`; only the anonymised demo workbook is committed.
 | `Main refresh command found` is not printed | `Command Begin` was not recorded | Add the event |
 | `WARNING: the refresh phases exceed the refresh command duration` | Timeline or Commit reach past the end of the refresh command, usually on a failed refresh | Finalization is shown as 0; the overshoot is in its `TextData` |
 | `WARNING: required events are missing in the trace` | Some events were not ticked in Profiler; the message lists them and what the output loses | Tick them (Step 1, Events) and record again. Error, Progress Report Error, Lock Waiting, Query End and Discover End cannot be checked this way: they appear only when something fails or waits |
+| `WARNING: refresh command not found` | The trace was started after the refresh began, so its `Command Begin` is missing | Start the trace first, then the refresh. Until then the output may include other sessions |
+| `WARNING: refresh command(s) without Command End` | The trace was stopped before the refresh finished | Stop the trace only after the refresh (and its retries) ended. The last attempt is not in the output |
+| `WARNING: refresh command has subclass …, not 38` | The refresh was started by a command type the script does not number as attempts | No attempts, Status, Preparation and Finalization; Timeline and Errors are still built |
+| `WARNING: no Success column in End events` | The Success column was not ticked in Profiler | Tick it and record again. Without it a failed attempt shows as Success and Failed/Cancelled rows are missing in Errors |
 | No Preparation / Finalization rows | `Execution Metrics` or `Command End` was not recorded | Add both events |
 | *Could not find file '…\refresh_analysis.xlsx'* when opening the template | The template points to the folder it was built in | [Step 3](#step-3-open-the-report) |
 
